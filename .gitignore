@@ -1,0 +1,9 @@
+# Ignore all files at repository root
+/*
+
+# Keep root directories trackable
+!/*/
+
+# Keep this ignore file itself
+!.gitignore
+
