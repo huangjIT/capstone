@@ -31,3 +31,7 @@ build/
 
 ### VS Code ###
 .vscode/
+
+
+### Docker Capstone Infrastructure ###
+postgres_data/

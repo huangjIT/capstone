@@ -1,9 +1,11 @@
-# Ignore all files at repository root
-/*
+# --- Global OS Files ---
+.DS_Store
+Thumbs.db
 
-# Keep root directories trackable
-!/*/
+# --- Global IDE Files ---
+.idea/
+.vscode/
 
-# Keep this ignore file itself
-!.gitignore
+# --- Global Environment ---
+.env
 
