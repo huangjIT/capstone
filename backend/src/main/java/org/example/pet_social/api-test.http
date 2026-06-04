@@ -1,0 +1,36 @@
+### Health check
+GET http://localhost:8080/api/system/health
+
+
+### Register a new user
+POST http://localhost:8080/api/users/register
+Content-Type: application/json
+
+{
+  "name": "John Doe",
+  "vehicleType": "BICYCLE",
+  "isAvailable": true,
+  "capabilityMask": 5
+}
+
+
+### Send user location telemetry
+POST http://localhost:8080/api/telemetry/location
+Content-Type: application/json
+
+{
+  "userId": 1,
+  "latitude": 40.7128,
+  "longitude": -74.0060
+}
+
+
+### Match a user for a request
+POST http://localhost:8080/api/match
+Content-Type: application/json
+
+{
+  "deliveryLatitude": 40.7128,
+  "deliveryLongitude": -74.0060,
+  "capabilitiesMask": 5
+}
