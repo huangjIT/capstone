@@ -9,6 +9,8 @@ lerna-debug.log*
 
 .idea
 .env
+.claude
+
 
 node_modules
 dist
