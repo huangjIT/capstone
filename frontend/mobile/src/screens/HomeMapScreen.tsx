@@ -26,17 +26,24 @@ export const HomeMapScreen: React.FC<{ navigation?: any }> = ({ navigation }) =>
   const [region, setRegion] = useState(DEFAULT_REGION);
   const mapRef = useRef<MapViewType>(null);
 
+  const handleLocateMe = async () => {
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') return;
+    const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+    mapRef.current?.animateCamera(
+      { center: { latitude: loc.coords.latitude, longitude: loc.coords.longitude }, zoom: 15 },
+      { duration: 600 }
+    );
+  };
+
   useEffect(() => {
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') return;
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      setRegion({
-        latitude: loc.coords.latitude,
-        longitude: loc.coords.longitude,
-        latitudeDelta: 0.02,
-        longitudeDelta: 0.02,
-      });
+      const coords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+      setRegion({ ...coords, latitudeDelta: 0.02, longitudeDelta: 0.02 });
+      mapRef.current?.animateCamera({ center: coords, zoom: 15 }, { duration: 800 });
     })();
   }, []);
 
@@ -87,6 +94,11 @@ export const HomeMapScreen: React.FC<{ navigation?: any }> = ({ navigation }) =>
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* Locate Me Button */}
+      <TouchableOpacity style={styles.locateBtn} onPress={handleLocateMe}>
+        <Text style={styles.locateBtnIcon}>📍</Text>
+      </TouchableOpacity>
 
       {/* Zoom Controls */}
       <View style={styles.zoomControls}>
@@ -168,6 +180,25 @@ const styles = StyleSheet.create({
     borderColor: COLORS.primaryBorder,
   },
   markerEmoji: {
+    fontSize: 22,
+  },
+  locateBtn: {
+    position: 'absolute',
+    right: 16,
+    bottom: 470,
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  locateBtnIcon: {
     fontSize: 22,
   },
   zoomControls: {
