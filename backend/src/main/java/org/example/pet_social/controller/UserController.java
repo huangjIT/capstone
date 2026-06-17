@@ -35,8 +35,8 @@ public class UserController {
      * 3) Return the saved user
      */
     @PostMapping("/register")
-    public ResponseEntity<User> registerDriver(@RequestBody User user) {
-        User savedUser = userRegistryService.registerDriver(user);
+    public ResponseEntity<User> registerUser(@RequestBody User user) {
+        User savedUser = userRegistryService.registerUser(user);
         return ResponseEntity.ok(savedUser);
     }
 }

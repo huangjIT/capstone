@@ -34,7 +34,7 @@ public class TestDataController {
     public ResponseEntity<Map<String, String>> generateUsers(
             @RequestParam(defaultValue = "100") int count) {
         log.info("Generating {} test users", count);
-        testDataGeneratorService.generateTestDrivers(count);
+        testDataGeneratorService.generateTestUsers(count);
         return ResponseEntity.ok(Map.of("status", "Users generation started", "count", String.valueOf(count)));
     }
 

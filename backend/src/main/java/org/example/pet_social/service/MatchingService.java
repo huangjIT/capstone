@@ -1,5 +1,7 @@
 package org.example.pet_social.service;
 
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import org.springframework.data.geo.Circle;
 import org.springframework.data.geo.Distance;
 import org.springframework.data.geo.GeoResult;
@@ -18,11 +20,11 @@ import java.util.Optional;
 import org.springframework.beans.factory.annotation.Autowired;
 
 /**
- * Matching engine (compile-safe first pass).
+ * Walking-partner matching engine (compile-safe first pass).
  * Responsibilities:
  * - search candidates in Redis by radius
  * - load per-user metadata
- * - filter by availability and capability bitmask
+ * - filter by availability and matching-preferences bitmask
  * - return the nearest valid user
  * We intentionally keep this version simple and readable first.
  * We can optimize metadata batching after the build is green.
@@ -39,15 +41,24 @@ public class MatchingService {
     private final StringRedisTemplate redis;
     private final GeoOperations<String, String> geoOps;
     private final DashboardService dashboardService;
+    private final Timer matchingTimer;
 
     @Autowired
-    public MatchingService(StringRedisTemplate redis, DashboardService dashboardService) {
+    public MatchingService(StringRedisTemplate redis, DashboardService dashboardService, MeterRegistry meterRegistry) {
         this.redis = redis;
         this.geoOps = redis.opsForGeo();
         this.dashboardService = dashboardService;
+        this.matchingTimer = Timer.builder("matching.duration")
+                .description("Time to resolve a walking-partner match request")
+                .publishPercentiles(0.5, 0.95, 0.99)
+                .register(meterRegistry);
     }
 
-    public Optional<Long> findNearestMatch(double latitude, double longitude, long requiredCapabilityMask) {
+    public Optional<Long> findNearestMatch(double latitude, double longitude, long requiredPreferencesMask) {
+        return matchingTimer.record(() -> findNearestMatchInternal(latitude, longitude, requiredPreferencesMask));
+    }
+
+    private Optional<Long> findNearestMatchInternal(double latitude, double longitude, long requiredPreferencesMask) {
         Point point = new Point(longitude, latitude);
 
         for (double radiusMeters : radiiMeters) {
@@ -69,11 +80,11 @@ public class MatchingService {
                     continue;
                 }
 
-                boolean available = Boolean.parseBoolean(String.valueOf(meta.getOrDefault("available", "false")));
-                long capabilityMask = parseLong(meta.get("capability"));
+                boolean active = Boolean.parseBoolean(String.valueOf(meta.getOrDefault("active", "false")));
+                long candidatePreferencesMask = parseLong(meta.get("preferences"));
 
-                // Candidate must be available and satisfy all required capability bits.
-                if (available && (capabilityMask & requiredCapabilityMask) == requiredCapabilityMask) {
+                // Candidate must be active and satisfy all required preference bits.
+                if (active && (candidatePreferencesMask & requiredPreferencesMask) == requiredPreferencesMask) {
                     // Successful match - increment dashboard metric
                     try {
                         dashboardService.incrementMatchSuccess();

@@ -1,21 +1,21 @@
 ﻿{
     "summary":  {
                     "status":  "RUNNING",
-                    "dataPoints":  3021,
-                    "timestamp":  1780273351708,
-                    "activeProcessing":  true
+                    "activeProcessing":  true,
+                    "timestamp":  1781658373181,
+                    "dataPoints":  744495
                 },
     "telemetry":  {
-                      "totalProcessed":  3021
+                      "totalProcessed":  744495
                   },
     "users":  {
-                  "total":  140,
-                  "available":  140,
-                  "inGeoIndex":  102
+                  "total":  100,
+                  "inGeoIndex":  100,
+                  "available":  100
               },
     "matching":  {
-                     "successRate":  "100.00%",
-                     "failedMatches":  0,
-                     "successfulMatches":  9
+                     "successfulMatches":  3,
+                     "failedMatches":  9,
+                     "successRate":  "25.00%"
                  }
 }

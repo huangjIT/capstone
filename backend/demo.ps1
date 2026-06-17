@@ -5,6 +5,9 @@ Write-Host "========================================"
 Write-Host "  PET SOCIAL - 10 Record PoC Demo"
 Write-Host "========================================"
 
+
+
+
 # 1) Health check
 Write-Host "`n[1] Health Check..."
 try {
@@ -21,14 +24,14 @@ $userIds = New-Object System.Collections.ArrayList
 $i = 0
 while ($i -lt 10) {
     $i++
-    $vehicleType = @("BICYCLE", "SCOOTER", "CAR")[($i % 3)]
-    $capMask = @(1, 3, 5, 7)[($i % 4)]
+    $prefMask = @(1, 3, 5, 7)[($i % 4)]
 
     $userJson = @{
         name = "TestUser_$i"
-        vehicleType = $vehicleType
-        isAvailable = $true
-        capabilityMask = $capMask
+        email = "testuser$i@example.com"
+        role = "PET_OWNER"
+        isActive = $true
+        matchPreferencesMask = $prefMask
     } | ConvertTo-Json
 
     try {
@@ -73,16 +76,16 @@ Write-Host "Sent: $teleCount records"
 Write-Host "`n[4] Running 3 match requests..."
 $matchCount = 0
 $matches = @(
-    @{ lat = 40.7128; lon = -74.0060; cap = 5 },
-    @{ lat = 40.7138; lon = -74.0070; cap = 3 },
-    @{ lat = 40.7148; lon = -74.0080; cap = 1 }
+    @{ lat = 40.7128; lon = -74.0060; pref = 5 },
+    @{ lat = 40.7138; lon = -74.0070; pref = 3 },
+    @{ lat = 40.7148; lon = -74.0080; pref = 1 }
 )
 
 foreach ($match in $matches) {
     $matchJson = @{
-        deliveryLatitude = $match.lat
-        deliveryLongitude = $match.lon
-        capabilitiesMask = $match.cap
+        searchLatitude = $match.lat
+        searchLongitude = $match.lon
+        preferencesMask = $match.pref
     } | ConvertTo-Json
 
     try {

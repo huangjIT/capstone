@@ -14,9 +14,17 @@ public class UserService {
         this.userRepository = userRepository;
     }
 
-    public User registerDriver(User user) {
-        // Here is where we would add logic later, like validating the vehicle type
+    public User registerUser(User user) {
+        // Here is where we would add logic later, like validating email format and role
         return userRepository.save(user);
+    }
+
+    public User getUserById(Long id) {
+        return userRepository.findById(id).orElse(null);
+    }
+
+    public User getUserByEmail(String email) {
+        return userRepository.findByEmail(email).orElse(null);
     }
 }
 

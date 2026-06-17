@@ -8,9 +8,10 @@ Content-Type: application/json
 
 {
   "name": "John Doe",
-  "vehicleType": "BICYCLE",
-  "isAvailable": true,
-  "capabilityMask": 5
+  "email": "john.doe@example.com",
+  "role": "PET_OWNER",
+  "isActive": true,
+  "matchPreferencesMask": 5
 }
 
 
@@ -25,12 +26,12 @@ Content-Type: application/json
 }
 
 
-### Match a user for a request
+### Match a user for a walking partner / meetup
 POST http://localhost:8080/api/match
 Content-Type: application/json
 
 {
-  "deliveryLatitude": 40.7128,
-  "deliveryLongitude": -74.0060,
-  "capabilitiesMask": 5
+  "searchLatitude": 40.7128,
+  "searchLongitude": -74.0060,
+  "preferencesMask": 5
 }
