@@ -24,7 +24,7 @@ public class MatchingController {
 
     @PostMapping
     public ResponseEntity<Object> findMatch(@RequestBody MatchRequest body) {
-        return matchingService.findNearestMatch(body.deliveryLatitude(), body.deliveryLongitude(), body.capabilitiesMask())
+        return matchingService.findNearestMatch(body.searchLatitude(), body.searchLongitude(), body.preferencesMask())
                 .map(userId -> ResponseEntity.ok(matchedBody(userId)))
                 .orElseGet(() -> ResponseEntity.status(404).body(noMatchBody()));
     }

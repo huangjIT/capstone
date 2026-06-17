@@ -1,13 +1,14 @@
 package org.example.pet_social.dto;
 
 /**
- * Request payload for dispatch matching.
- * Use delivery coordinates explicitly so the frontend team can wire the
- * "where should this order go?" flow without guessing field names.
+ * Request payload for walking-partner matching.
+ * searchLatitude/searchLongitude describe where the user is looking for a
+ * nearby match; preferencesMask is the bitmask of matching preferences to
+ * require on the candidate.
  */
 public record MatchRequest(
-        double deliveryLatitude,
-        double deliveryLongitude,
-        long capabilitiesMask
+        double searchLatitude,
+        double searchLongitude,
+        long preferencesMask
 ) {}
 

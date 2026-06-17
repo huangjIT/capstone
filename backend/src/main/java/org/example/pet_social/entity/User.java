@@ -4,31 +4,38 @@ import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "drivers")
+@Table(name = "users", indexes = {
+    @Index(name = "idx_users_role", columnList = "role")
+})
 public class User {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "users_seq")
+    @SequenceGenerator(name = "users_seq", sequenceName = "users_seq", allocationSize = 50)
     private Long id;
 
     @Column(nullable = false)
     private String name;
 
-    @Column(nullable = false)
-    private String vehicleType; // e.g., BICYCLE, CAR, SCOOTER
+    @Column(unique = true, nullable = false)
+    private String email;
 
     @Column(nullable = false)
-    private boolean isAvailable; // True if they can accept an order
+    private String role; // e.g., PET_OWNER, PET_SITTER, VET, BUSINESS
+
+    @Column(name = "is_active", nullable = false)
+    private boolean isActive; // True if account is active and available for connections
 
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
-    @Column(name = "capability_mask")
-    private Long capabilityMask = 0L;
+    // Bitmask of walking-partner matching preferences (e.g. accepts large dogs, walks at night).
+    // Consumed by MatchingService when filtering candidates.
+    @Column(name = "match_preferences_mask")
+    private Long matchPreferencesMask = 0L;
 
-    // add getter/setter
-    public Long getCapabilityMask() { return capabilityMask; }
-    public void setCapabilityMask(Long capabilityMask) { this.capabilityMask = capabilityMask; }
+    public Long getMatchPreferencesMask() { return matchPreferencesMask; }
+    public void setMatchPreferencesMask(Long matchPreferencesMask) { this.matchPreferencesMask = matchPreferencesMask; }
 
     @PrePersist
     protected void onCreate() {
@@ -38,10 +45,11 @@ public class User {
     // Default constructor required by JPA
     public User() {}
 
-    public User(String name, String vehicleType, boolean isAvailable) {
+    public User(String name, String email, String role, boolean isActive) {
         this.name = name;
-        this.vehicleType = vehicleType;
-        this.isAvailable = isAvailable;
+        this.email = email;
+        this.role = role;
+        this.isActive = isActive;
     }
 
     // Getters and Setters
@@ -49,11 +57,14 @@ public class User {
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
 
-    public String getVehicleType() { return vehicleType; }
-    public void setVehicleType(String vehicleType) { this.vehicleType = vehicleType; }
+    public String getEmail() { return email; }
+    public void setEmail(String email) { this.email = email; }
 
-    public boolean isAvailable() { return isAvailable; }
-    public void setAvailable(boolean available) { isAvailable = available; }
+    public String getRole() { return role; }
+    public void setRole(String role) { this.role = role; }
+
+    public boolean isActive() { return isActive; }
+    public void setActive(boolean active) { isActive = active; }
 
     public LocalDateTime getCreatedAt() { return createdAt; }
 }

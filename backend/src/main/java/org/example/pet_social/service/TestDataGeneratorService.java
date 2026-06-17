@@ -22,14 +22,17 @@ public class TestDataGeneratorService {
     private final TelemetryConsumerService telemetryConsumerService; // direct processing for PoC
     private final DashboardService dashboardService;
 
-    // NYC coordinates for testing
-    private static final double NYC_LAT_MIN = 40.5;
-    private static final double NYC_LAT_MAX = 40.9;
-    private static final double NYC_LON_MIN = -74.3;
-    private static final double NYC_LON_MAX = -73.7;
+    // Toronto coordinates for testing (Sprint 4 load test target: 50k+ users walking dogs after 5pm)
+    private static final double TORONTO_LAT_MIN = 43.58;
+    private static final double TORONTO_LAT_MAX = 43.86;
+    private static final double TORONTO_LON_MIN = -79.64;
+    private static final double TORONTO_LON_MAX = -79.12;
 
-    private final String[] vehicleTypes = {"BICYCLE", "SCOOTER", "CAR", "MOTORCYCLE"};
-    private final long[] capabilityMasks = {1, 3, 5, 7, 15, 31};
+    private final String[] userRoles = {"PET_OWNER", "PET_SITTER", "VET", "BUSINESS"};
+    private final long[] preferenceMasks = {1, 3, 5, 7, 15, 31};
+
+    // Sample email domains for test data
+    private final String[] emailDomains = {"gmail.com", "yahoo.com", "outlook.com", "example.com"};
 
     private Random random = new Random();
     private int generatedUserCount = 0;
@@ -49,20 +52,21 @@ public class TestDataGeneratorService {
     /**
      * Generate N test users and register them
      */
-    public void generateTestDrivers(int count) {
+    public void generateTestUsers(int count) {
         log.info("Starting to generate {} test users...", count);
         long startTime = System.currentTimeMillis();
 
         for (int i = 1; i <= count; i++) {
             try {
                 String userName = "TestUser_" + i;
-                String vehicleType = vehicleTypes[random.nextInt(vehicleTypes.length)];
-                long capabilityMask = capabilityMasks[random.nextInt(capabilityMasks.length)];
+                String email = "testuser" + i + "@" + emailDomains[random.nextInt(emailDomains.length)];
+                String role = userRoles[random.nextInt(userRoles.length)];
+                long preferencesMask = preferenceMasks[random.nextInt(preferenceMasks.length)];
 
-                User user = new User(userName, vehicleType, true);
-                user.setCapabilityMask(capabilityMask);
+                User user = new User(userName, email, role, true);
+                user.setMatchPreferencesMask(preferencesMask);
 
-                userRegistryService.registerDriver(user);
+                userRegistryService.registerUser(user);
                 generatedUserCount++;
 
                 if (i % 100 == 0) {
@@ -91,9 +95,9 @@ public class TestDataGeneratorService {
                 // Random user ID (1 to maxUserId)
                 long userId = random.nextInt(maxUserId) + 1;
 
-                // Random location within NYC bounds
-                double latitude = NYC_LAT_MIN + (NYC_LAT_MAX - NYC_LAT_MIN) * random.nextDouble();
-                double longitude = NYC_LON_MIN + (NYC_LON_MAX - NYC_LON_MIN) * random.nextDouble();
+                // Random location within Toronto bounds
+                double latitude = TORONTO_LAT_MIN + (TORONTO_LAT_MAX - TORONTO_LAT_MIN) * random.nextDouble();
+                double longitude = TORONTO_LON_MIN + (TORONTO_LON_MAX - TORONTO_LON_MIN) * random.nextDouble();
 
                 UserLocation location = new UserLocation(userId, latitude, longitude);
                 // For a simple PoC, process telemetry directly without requiring Kafka roundtrip
@@ -135,8 +139,8 @@ public class TestDataGeneratorService {
                 try {
                     for (int i = 0; i < recordsPerSecond; i++) {
                         long userId = random.nextInt(userCount) + 1;
-                        double latitude = NYC_LAT_MIN + (NYC_LAT_MAX - NYC_LAT_MIN) * random.nextDouble();
-                        double longitude = NYC_LON_MIN + (NYC_LON_MAX - NYC_LON_MIN) * random.nextDouble();
+                        double latitude = TORONTO_LAT_MIN + (TORONTO_LAT_MAX - TORONTO_LAT_MIN) * random.nextDouble();
+                        double longitude = TORONTO_LON_MIN + (TORONTO_LON_MAX - TORONTO_LON_MIN) * random.nextDouble();
 
                         UserLocation location = new UserLocation(userId, latitude, longitude);
                         telemetryProducerService.sendLocation(location);

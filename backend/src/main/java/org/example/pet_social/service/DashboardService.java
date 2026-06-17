@@ -26,7 +26,7 @@ public class DashboardService {
     private final Counter matchSuccessCounter;
     private final Counter matchFailedCounter;
 
-    private static final String TELEMETRY_COUNT_KEY = "metrics:telemetry:count";
+    static final String TELEMETRY_COUNT_KEY = "metrics:telemetry:count";
     private static final String MATCH_SUCCESS_KEY = "metrics:match:success";
     private static final String MATCH_FAILED_KEY = "metrics:match:failed";
     private static final String GEO_KEY = "users:geo";
@@ -37,28 +37,28 @@ public class DashboardService {
         this.meterRegistry = meterRegistry;
 
         // Register counters
-        this.telemetryCounter = Counter.builder("dispatch.telemetry.processed")
+        this.telemetryCounter = Counter.builder("matching.telemetry.processed")
                 .description("Total telemetry messages processed")
                 .register(meterRegistry);
 
-        this.matchSuccessCounter = Counter.builder("dispatch.match.success")
+        this.matchSuccessCounter = Counter.builder("matching.match.success")
                 .description("Number of successful matches")
                 .register(meterRegistry);
 
-        this.matchFailedCounter = Counter.builder("dispatch.match.failed")
+        this.matchFailedCounter = Counter.builder("matching.match.failed")
                 .description("Number of failed matches")
                 .register(meterRegistry);
 
         // Register gauges backed by functions
-        Gauge.builder("dispatch.users.total", userRepository, UserRepository::count)
+        Gauge.builder("matching.users.total", userRepository, UserRepository::count)
                 .description("Total number of users in Postgres")
                 .register(meterRegistry);
 
-        Gauge.builder("dispatch.users.available", this, DashboardService::availableUsersCount)
+        Gauge.builder("matching.users.available", this, DashboardService::availableUsersCount)
                 .description("Number of available users")
                 .register(meterRegistry);
 
-        Gauge.builder("dispatch.users.in_geo", this, DashboardService::usersInGeoCount)
+        Gauge.builder("matching.users.in_geo", this, DashboardService::usersInGeoCount)
                 .description("Number of users in Redis geo index")
                 .register(meterRegistry);
     }
@@ -66,7 +66,7 @@ public class DashboardService {
     // Helper used by Micrometer gauges
     private double availableUsersCount() {
         try {
-            return userRepository.findByIsAvailableTrue().size();
+            return userRepository.findByIsActiveTrue().size();
         } catch (Exception e) {
             return 0.0;
         }
@@ -88,8 +88,8 @@ public class DashboardService {
         Map<String, Object> metrics = new HashMap<>();
 
         // User metrics
-        long totalDrivers = userRepository.count();
-        long availableDrivers = (long) userRepository.findByIsAvailableTrue().size();
+        long totalUsers = userRepository.count();
+        long activeUsers = (long) userRepository.findByIsActiveTrue().size();
 
         // Telemetry metrics
         String telemetryCountStr = redisTemplate.opsForValue().get(TELEMETRY_COUNT_KEY);
@@ -114,8 +114,8 @@ public class DashboardService {
 
         // Build response
         metrics.put("users", Map.of(
-            "total", totalDrivers,
-            "available", availableDrivers,
+            "total", totalUsers,
+            "available", activeUsers,
             "inGeoIndex", usersInGeo
         ));
 
@@ -146,6 +146,12 @@ public class DashboardService {
      */
     public void incrementTelemetryCount() {
         redisTemplate.opsForValue().increment(TELEMETRY_COUNT_KEY);
+        try { telemetryCounter.increment(); } catch (Exception ignored) {}
+    }
+
+    // Micrometer-only increment, for callers (e.g. TelemetryConsumerService) that already
+    // pipeline the Redis INCR for TELEMETRY_COUNT_KEY themselves to avoid a separate round-trip.
+    public void recordTelemetryProcessed() {
         try { telemetryCounter.increment(); } catch (Exception ignored) {}
     }
 

@@ -24,14 +24,14 @@ public class UserRegistryService {
     /**
      * Persist user in DB and write initial metadata to Redis.
      */
-    public User registerDriver(User user) {
-        User saved = userService.registerDriver(user);
+    public User registerUser(User user) {
+        User saved = userService.registerUser(user);
 
         String metaKey = META_PREFIX + saved.getId();
-        long capabilityMask = saved.getCapabilityMask() == null ? 0L : saved.getCapabilityMask();
+        long preferencesMask = saved.getMatchPreferencesMask() == null ? 0L : saved.getMatchPreferencesMask();
         Map<String, String> meta = new HashMap<>();
-        meta.put("available", String.valueOf(saved.isAvailable()));
-        meta.put("capability", String.valueOf(capabilityMask));
+        meta.put("active", String.valueOf(saved.isActive()));
+        meta.put("preferences", String.valueOf(preferencesMask));
         meta.put("lastSeen", String.valueOf(System.currentTimeMillis()));
 
         redisTemplate.opsForHash().putAll(metaKey, meta);
@@ -40,17 +40,17 @@ public class UserRegistryService {
         return saved;
     }
 
-    public void updateAvailability(Long userId, boolean available) {
+    public void updateActiveStatus(Long userId, boolean active) {
         String metaKey = META_PREFIX + userId;
-        redisTemplate.opsForHash().put(metaKey, "available", String.valueOf(available));
+        redisTemplate.opsForHash().put(metaKey, "active", String.valueOf(active));
     }
 
-    public void updateCapability(Long userId, long capabilityMask) {
+    public void updatePreferences(Long userId, long preferencesMask) {
         String metaKey = META_PREFIX + userId;
-        redisTemplate.opsForHash().put(metaKey, "capability", String.valueOf(capabilityMask));
+        redisTemplate.opsForHash().put(metaKey, "preferences", String.valueOf(preferencesMask));
     }
 
-    public void removeDriverMeta(Long userId) {
+    public void removeUserMeta(Long userId) {
         String metaKey = META_PREFIX + userId;
         redisTemplate.delete(metaKey);
     }
