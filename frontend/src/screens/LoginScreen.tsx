@@ -1,3 +1,4 @@
+import { loginUser, registerUser } from '../services/authService';
 import React, { useRef, useState } from 'react';
 import {
   View,
