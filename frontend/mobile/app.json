@@ -9,8 +9,10 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "PawPal needs your location to show nearby pets and walking partners."
-      }
+        "NSLocationWhenInUseUsageDescription": "PawPal needs your location to show nearby pets and walking partners.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "bundleIdentifier": "com.anonymous.mobile"
     },
     "android": {
       "adaptiveIcon": {
@@ -22,7 +24,7 @@
       "predictiveBackGestureEnabled": false,
       "config": {
         "googleMaps": {
-          "apiKey": ""
+          "apiKey": "AIzaSyD5WlW4eXly1Mo7SgbGs0HWba5owN8y_iI"
         }
       },
       "permissions": [
@@ -33,6 +35,11 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "d4acc4d5-1406-497e-a826-042be7fc9f4d"
+      }
     }
   }
 }
