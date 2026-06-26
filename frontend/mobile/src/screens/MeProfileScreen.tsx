@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/colors';
+import { clearToken } from '../utils/api';
 
 interface MeProfileScreenProps {
   navigation: any;
@@ -143,7 +144,10 @@ export const MeProfileScreen: React.FC<MeProfileScreenProps> = ({ navigation }) 
       </View>
 
       {/* Sign Out */}
-      <TouchableOpacity style={styles.signOutBtn}>
+      <TouchableOpacity
+        style={styles.signOutBtn}
+        onPress={async () => { await clearToken(); navigation.reset({ index: 0, routes: [{ name: 'Login' }] }); }}
+      >
         <Text style={styles.signOutText}>Sign Out</Text>
       </TouchableOpacity>
     </ScrollView>
