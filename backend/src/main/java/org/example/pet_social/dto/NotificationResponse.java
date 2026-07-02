@@ -11,5 +11,8 @@ public record NotificationResponse(
         String time,
         String preview,
         boolean isNew,
-        String categoryLabel
+        String categoryLabel,
+        String relatedType,
+        Long relatedId,
+        Long senderId
 ) {}

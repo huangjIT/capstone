@@ -7,7 +7,8 @@ import java.time.LocalDateTime;
 @Table(name = "messages", indexes = {
     @Index(name = "idx_sender_receiver", columnList = "sender_id,receiver_id"),
     @Index(name = "idx_receiver_read", columnList = "receiver_id,is_read"),
-    @Index(name = "idx_messages_conversation", columnList = "sender_id,receiver_id,created_at")
+    @Index(name = "idx_messages_conversation", columnList = "sender_id,receiver_id,created_at"),
+    @Index(name = "idx_messages_context", columnList = "context_type,context_id")
 })
 public class Message {
 
@@ -32,6 +33,14 @@ public class Message {
 
     @Column(name = "media_url")
     private String mediaUrl; // For images or other media
+
+    // Scopes the message to a thread: a match request chat (MATCH + pet_matches.id),
+    // a marketplace listing chat (LISTING + marketplace_items.id), or GENERAL DM (null)
+    @Column(name = "context_type")
+    private String contextType;
+
+    @Column(name = "context_id")
+    private Long contextId;
 
     @Column(name = "is_read", nullable = false)
     private Boolean isRead = false;
@@ -82,6 +91,12 @@ public class Message {
 
     public String getMediaUrl() { return mediaUrl; }
     public void setMediaUrl(String mediaUrl) { this.mediaUrl = mediaUrl; }
+
+    public String getContextType() { return contextType; }
+    public void setContextType(String contextType) { this.contextType = contextType; }
+
+    public Long getContextId() { return contextId; }
+    public void setContextId(Long contextId) { this.contextId = contextId; }
 
     public Boolean getIsRead() { return isRead; }
     public void setIsRead(Boolean isRead) {

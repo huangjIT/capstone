@@ -7,16 +7,30 @@ public class AuthResponse {
     private String email;
     private String role;
     private boolean active;
+    private String token;
 
     public AuthResponse() {
     }
 
     public AuthResponse(Long id, String name, String email, String role, boolean active) {
+        this(id, name, email, role, active, null);
+    }
+
+    public AuthResponse(Long id, String name, String email, String role, boolean active, String token) {
         this.id = id;
         this.name = name;
         this.email = email;
         this.role = role;
         this.active = active;
+        this.token = token;
+    }
+
+    public String getToken() {
+        return token;
+    }
+
+    public void setToken(String token) {
+        this.token = token;
     }
 
     public Long getId() {

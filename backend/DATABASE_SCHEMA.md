@@ -4,15 +4,16 @@ Complete database schema for the PawPal pet social networking platform.
 
 ## Overview
 
-The PawPal database consists of **11 core tables** supporting:
-- User management and authentication
+The PawPal database consists of **12 core tables** supporting:
+- User management and authentication (BCrypt password hashes, JWT bearer tokens)
 - Pet profiles and ownership
 - Social networking (friendships, posts, comments)
 - Events and meetups (walk invitations are WALK-type events)
-- Direct messaging
-- Pet matching and compatibility
+- Direct messaging (thread-scoped to matches/listings via context columns)
+- Pet matching and compatibility (walk/blind-date request flow)
 - Second-hand marketplace listings
-- In-app notification feed
+- In-app notification feed (with deep-link references)
+- Pet reviews feeding the aggregate pets.rating
 
 ---
 
@@ -296,6 +297,8 @@ INSERT INTO event_attendees (event_id, user_id, pet_id, rsvp_status) VALUES
 | content | VARCHAR(2000) | NOT NULL | Message text |
 | message_type | VARCHAR | DEFAULT 'TEXT' | TEXT, IMAGE, LOCATION |
 | media_url | VARCHAR | | Attachment URL |
+| context_type | VARCHAR | | Thread scope: MATCH (pet_matches.id), LISTING (marketplace_items.id), NULL = general DM |
+| context_id | BIGINT | | ID of the match/listing the thread belongs to |
 | is_read | BOOLEAN | DEFAULT FALSE | Read status |
 | read_at | TIMESTAMP | | When message was read |
 | created_at | TIMESTAMP | NOT NULL | Message sent time |
@@ -304,6 +307,7 @@ INSERT INTO event_attendees (event_id, user_id, pet_id, rsvp_status) VALUES
 - PRIMARY KEY on `id`
 - INDEX on `(sender_id, receiver_id)` for conversations
 - INDEX on `(receiver_id, is_read)` for unread counts
+- INDEX on `(context_type, context_id)` for thread lookups
 
 **Sample Data:**
 ```sql
@@ -393,6 +397,8 @@ time, even if the sender later renames themselves or their pet.
 | pet_name | VARCHAR | | Snapshot of the related pet's name |
 | pet_emoji | VARCHAR(8) | | Snapshot of the related pet's emoji |
 | preview | VARCHAR(500) | NOT NULL | One-line preview text |
+| related_type | VARCHAR | | Deep link target type: MATCH, EVENT, MESSAGE, PET, LISTING |
+| related_id | BIGINT | | ID of the related entity the app should open on tap |
 | is_read | BOOLEAN | NOT NULL, DEFAULT FALSE | Read status (`isNew` in the app = NOT is_read) |
 | created_at | TIMESTAMP | NOT NULL | When the notification fired |
 
@@ -400,6 +406,33 @@ time, even if the sender later renames themselves or their pet.
 - PRIMARY KEY on `id`
 - INDEX on `(recipient_id, created_at)` (`idx_notifications_recipient`) for the feed
 - INDEX on `(recipient_id, is_read)` (`idx_notifications_unread`) for badge counts
+
+---
+
+### 12. REVIEWS
+
+**Purpose:** 1-5 star reviews of pets after walks/dates. `pets.rating` holds the
+running average and is recomputed by `ReviewController` on every write.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| id | BIGSERIAL | PRIMARY KEY | Auto-incrementing review ID |
+| reviewer_id | BIGINT | NOT NULL, FK → users.id | Reviewing user |
+| pet_id | BIGINT | NOT NULL, FK → pets.id | Reviewed pet |
+| rating | INTEGER | NOT NULL | 1-5 stars |
+| comment | VARCHAR(1000) | | Review text |
+| created_at | TIMESTAMP | NOT NULL | Review creation |
+| updated_at | TIMESTAMP | NOT NULL | Last edit |
+
+**Constraints:**
+- UNIQUE (reviewer_id, pet_id) — one review per reviewer per pet (re-posting updates it)
+- Application guard: cannot review your own pet
+
+**Indexes:**
+- PRIMARY KEY on `id`
+- UNIQUE INDEX on `(reviewer_id, pet_id)`
+- INDEX on `pet_id` (`idx_reviews_pet`)
+- INDEX on `reviewer_id` (`idx_reviews_reviewer`)
 
 ---
 
@@ -503,6 +536,13 @@ CREATE INDEX idx_marketplace_status ON marketplace_items(status, created_at);
 -- Notification queries
 CREATE INDEX idx_notifications_recipient ON notifications(recipient_id, created_at);
 CREATE INDEX idx_notifications_unread ON notifications(recipient_id, is_read);
+
+-- Message thread scoping
+CREATE INDEX idx_messages_context ON messages(context_type, context_id);
+
+-- Review queries
+CREATE INDEX idx_reviews_pet ON reviews(pet_id);
+CREATE INDEX idx_reviews_reviewer ON reviews(reviewer_id);
 ```
 
 ---
@@ -528,9 +568,13 @@ from the in-memory session set by `authService` on login/register.
 | MarketplaceScreen | `MarketplaceItem` | `GET /api/marketplace/items?category` | `marketplace_items` + `users` |
 | LoginScreen / SignupScreen | `AuthUser` | `POST /api/users/login`, `POST /api/users/register` | `users` |
 | MeProfileScreen / ConnectPetProfileScreen | — | `GET /api/pets/owner/{ownerId}`, `POST /api/pets` | `pets` |
+| Connect / Send Match Request + Accept/Deny/Block | — | `POST /api/matches`, `PUT /api/matches/{id}/accept·deny·block` 🔒 | `pet_matches` + `notifications` |
+| WalkRequestDetail / NotificationDetail / MarketplaceChat (chat) | — | `POST /api/messages`, `GET /api/messages/thread·conversations` 🔒 | `messages` (context-scoped) |
+| Pet profile reviews | — | `POST /api/reviews`, `GET /api/reviews/pet/{petId}` | `reviews` → aggregates into `pets.rating` |
 
-Not yet backed: MarketplaceChatScreen (needs a `MessageController` over the
-existing `messages` table) and per-notification deep links.
+🔒 = requires `Authorization: Bearer <token>` from `/api/auth/login|register`.
+**See `../API_REFERENCE.md` (repo root) for the full endpoint documentation with
+request/response examples — that file is the integration contract for the app.**
 
 ---
 
@@ -722,11 +766,11 @@ VACUUM ANALYZE posts;
 
 ## Schema Version
 
-**Version:** 1.1.0
+**Version:** 1.2.0
 **Date:** 2026-07-02
-**Status:** Frontend-mapped release (adds marketplace_items, notifications; pet/event display columns)
-**Entities:** 11 tables
-**Total Columns:** 150+
+**Status:** Match/message/review release (adds reviews; message thread context; notification deep links; BCrypt+JWT auth)
+**Entities:** 12 tables
+**Total Columns:** 160+
 
 ---
 
@@ -735,10 +779,14 @@ VACUUM ANALYZE posts;
 1. ✅ Entities created
 2. ✅ Repositories created
 3. ✅ REST API endpoints for app screens (pets, invitations, notifications, marketplace)
-4. ✅ Frontend integration (services + screens wired with mock fallback)
-5. ⏳ MessageController for MarketplaceChatScreen (messages table already exists)
-6. ⏳ Authentication & authorization (JWT — login currently returns the user object only)
-7. ⏳ Posts/comments/friendships service layer
+4. ✅ Match request flow (connect → accept/deny/block) with reverse-pair guard
+5. ✅ MessageController with match/listing thread scoping
+6. ✅ Reviews + aggregate pet rating
+7. ✅ BCrypt + JWT (enforced on /api/matches and /api/messages; see API_REFERENCE.md)
+8. ⏳ Enforce Bearer token on all /api/** endpoints (full Spring Security)
+9. ⏳ Media upload (pet/listing/message photos)
+10. ⏳ Posts/comments/friendships service layer (no Feed tab in current design)
+11. ⏳ Flyway migrations replacing ddl-auto: update
 
 ---
 

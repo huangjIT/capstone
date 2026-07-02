@@ -1,5 +1,6 @@
 package org.example.pet_social.controller;
 
+import jakarta.validation.Valid;
 import org.example.pet_social.dto.NotificationCreateRequest;
 import org.example.pet_social.dto.NotificationResponse;
 import org.example.pet_social.dto.UiFormat;
@@ -57,9 +58,9 @@ public class NotificationController {
 
     /** Used by other flows (blind-date requests, marketplace interest) to push feed items. */
     @PostMapping
-    public ResponseEntity<NotificationResponse> create(@RequestBody NotificationCreateRequest req) {
+    public ResponseEntity<NotificationResponse> create(@Valid @RequestBody NotificationCreateRequest req) {
         User recipient = userService.getUserById(req.recipientId());
-        if (recipient == null || req.category() == null || req.preview() == null) {
+        if (recipient == null) {
             return ResponseEntity.badRequest().build();
         }
         Notification n = new Notification(recipient, req.category().toUpperCase(), req.preview());
@@ -70,6 +71,9 @@ public class NotificationController {
         }
         n.setPetName(req.petName());
         n.setPetEmoji(req.petEmoji());
+        if (req.relatedType() != null) {
+            n.setRelated(req.relatedType().toUpperCase(), req.relatedId());
+        }
         return ResponseEntity.ok(toResponse(notificationRepository.save(n)));
     }
 
@@ -84,7 +88,10 @@ public class NotificationController {
                 UiFormat.relativeTime(n.getCreatedAt()),
                 n.getPreview(),
                 !Boolean.TRUE.equals(n.getIsRead()),
-                UiFormat.notifLabel(n.getCategory())
+                UiFormat.notifLabel(n.getCategory()),
+                n.getRelatedType() == null ? null : n.getRelatedType().toLowerCase(),
+                n.getRelatedId(),
+                n.getSenderId()
         );
     }
 }

@@ -1,17 +1,25 @@
 package org.example.pet_social.dto;
 
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
+
 import java.time.LocalDate;
 import java.util.List;
 
 public record PetCreateRequest(
-        Long ownerId,
-        String name,
+        @NotNull(message = "ownerId is required") Long ownerId,
+        @NotBlank(message = "name is required") String name,
+        @Pattern(regexp = "(?i)DOG|CAT|BIRD|RABBIT|OTHER",
+                 message = "species must be one of: DOG, CAT, BIRD, RABBIT, OTHER")
         String species,
         String breed,
+        @Pattern(regexp = "(?i)MALE|FEMALE|UNKNOWN", message = "gender must be MALE, FEMALE or UNKNOWN")
         String gender,
         LocalDate dateOfBirth,
-        String bio,
-        String avatarEmoji,
+        @Size(max = 1000, message = "bio must be at most 1000 characters") String bio,
+        @Size(max = 8) String avatarEmoji,
         List<String> personalityTags,
         Boolean vaccinated,
         Boolean neutered,
