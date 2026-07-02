@@ -1,5 +1,6 @@
 package org.example.pet_social.controller;
 
+import jakarta.validation.Valid;
 import org.example.pet_social.dto.InvitationRequest;
 import org.example.pet_social.dto.InvitationResponse;
 import org.example.pet_social.dto.UiFormat;
@@ -67,7 +68,7 @@ public class InvitationController {
 
     /** PostInvitationScreen. */
     @PostMapping
-    public ResponseEntity<InvitationResponse> create(@RequestBody InvitationRequest req) {
+    public ResponseEntity<InvitationResponse> create(@Valid @RequestBody InvitationRequest req) {
         User organizer = userService.getUserById(req.organizerId());
         if (organizer == null || req.route() == null || req.dateTime() == null) {
             return ResponseEntity.badRequest().build();
@@ -85,7 +86,7 @@ public class InvitationController {
 
     /** EditInvitationScreen. */
     @PutMapping("/{id}")
-    public ResponseEntity<InvitationResponse> update(@PathVariable Long id, @RequestBody InvitationRequest req) {
+    public ResponseEntity<InvitationResponse> update(@PathVariable Long id, @Valid @RequestBody InvitationRequest req) {
         return eventRepository.findById(id).map(event -> {
             if (req.route() != null) {
                 event.setTitle(req.route());
@@ -134,6 +135,7 @@ public class InvitationController {
                 joiner.getName() + " joined your walk: " + event.getTitle());
         notif.setSender(joiner);
         notif.setSenderName(joiner.getName());
+        notif.setRelated("EVENT", event.getId());
         notificationRepository.save(notif);
 
         return ResponseEntity.ok(toResponse(event));

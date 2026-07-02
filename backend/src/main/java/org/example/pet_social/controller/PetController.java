@@ -1,5 +1,6 @@
 package org.example.pet_social.controller;
 
+import jakarta.validation.Valid;
 import org.example.pet_social.dto.BlindDatePetResponse;
 import org.example.pet_social.dto.NearbyPetResponse;
 import org.example.pet_social.dto.PetCreateRequest;
@@ -69,7 +70,7 @@ public class PetController {
     }
 
     @PostMapping
-    public ResponseEntity<PetResponse> create(@RequestBody PetCreateRequest req) {
+    public ResponseEntity<PetResponse> create(@Valid @RequestBody PetCreateRequest req) {
         User owner = userService.getUserById(req.ownerId());
         if (owner == null) {
             return ResponseEntity.badRequest().build();

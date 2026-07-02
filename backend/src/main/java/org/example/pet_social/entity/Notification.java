@@ -43,6 +43,13 @@ public class Notification {
     @Column(length = 500, nullable = false)
     private String preview;
 
+    // Deep link: what tapping the notification should open (MATCH, EVENT, MESSAGE, PET, LISTING)
+    @Column(name = "related_type")
+    private String relatedType;
+
+    @Column(name = "related_id")
+    private Long relatedId;
+
     @Column(name = "is_read", nullable = false)
     private Boolean isRead = false;
 
@@ -89,6 +96,17 @@ public class Notification {
 
     public String getPreview() { return preview; }
     public void setPreview(String preview) { this.preview = preview; }
+
+    public String getRelatedType() { return relatedType; }
+    public void setRelatedType(String relatedType) { this.relatedType = relatedType; }
+
+    public Long getRelatedId() { return relatedId; }
+    public void setRelatedId(Long relatedId) { this.relatedId = relatedId; }
+
+    public void setRelated(String relatedType, Long relatedId) {
+        this.relatedType = relatedType;
+        this.relatedId = relatedId;
+    }
 
     public Boolean getIsRead() { return isRead; }
     public void setIsRead(Boolean isRead) { this.isRead = isRead; }

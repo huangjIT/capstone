@@ -1,46 +1,48 @@
 package org.example.pet_social.controller;
 
+import jakarta.validation.Valid;
 import org.example.pet_social.dto.AuthResponse;
 import org.example.pet_social.dto.LoginRequest;
 import org.example.pet_social.dto.SignupRequest;
 import org.example.pet_social.entity.User;
-import org.example.pet_social.service.UserRegistryService;
+import org.example.pet_social.service.AuthService;
+import org.example.pet_social.service.JwtService;
 import org.example.pet_social.service.UserService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.HexFormat;
-
+/**
+ * Legacy auth alias kept for the original frontend/src services; new clients
+ * should use /api/auth (AuthController). Both share AuthService (BCrypt).
+ */
 @RestController
 @RequestMapping("/api/users")
 public class UserController {
 
-    private final UserRegistryService userRegistryService;
     private final UserService userService;
+    private final AuthService authService;
+    private final JwtService jwtService;
 
-    public UserController(UserRegistryService userRegistryService, UserService userService) {
-        this.userRegistryService = userRegistryService;
+    public UserController(UserService userService, AuthService authService, JwtService jwtService) {
         this.userService = userService;
+        this.authService = authService;
+        this.jwtService = jwtService;
     }
 
     @PostMapping("/register")
-    public ResponseEntity<AuthResponse> registerUser(@RequestBody SignupRequest req) {
-        if (userService.getUserByEmail(req.getEmail()) != null) {
+    public ResponseEntity<AuthResponse> registerUser(@Valid @RequestBody SignupRequest req) {
+        User user = authService.register(req.getName(), req.getEmail(), req.getPassword(),
+                req.getRole(), req.isActive(), req.getMatchPreferencesMask());
+        if (user == null) {
             return ResponseEntity.badRequest().build();
         }
-        User user = new User(req.getName(), req.getEmail(), req.getRole(), req.isActive());
-        user.setPasswordHash(hashPassword(req.getPassword()));
-        user.setMatchPreferencesMask(req.getMatchPreferencesMask());
-        User saved = userRegistryService.registerUser(user);
-        return ResponseEntity.ok(toResponse(saved));
+        return ResponseEntity.ok(toResponse(user));
     }
 
     @PostMapping("/login")
     public ResponseEntity<AuthResponse> loginUser(@RequestBody LoginRequest req) {
-        User user = userService.getUserByEmail(req.getEmail());
-        if (user == null || !hashPassword(req.getPassword()).equals(user.getPasswordHash())) {
+        User user = authService.login(req.getEmail(), req.getPassword());
+        if (user == null) {
             return ResponseEntity.status(401).build();
         }
         return ResponseEntity.ok(toResponse(user));
@@ -54,15 +56,7 @@ public class UserController {
     }
 
     private AuthResponse toResponse(User u) {
-        return new AuthResponse(u.getId(), u.getName(), u.getEmail(), u.getRole(), u.isActive());
-    }
-
-    private String hashPassword(String password) {
-        try {
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
-            return HexFormat.of().formatHex(md.digest(password.getBytes()));
-        } catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException("SHA-256 unavailable", e);
-        }
+        return new AuthResponse(u.getId(), u.getName(), u.getEmail(), u.getRole(), u.isActive(),
+                jwtService.issue(u.getId(), u.getEmail()));
     }
 }

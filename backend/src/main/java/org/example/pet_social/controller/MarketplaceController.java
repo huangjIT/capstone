@@ -1,5 +1,6 @@
 package org.example.pet_social.controller;
 
+import jakarta.validation.Valid;
 import org.example.pet_social.dto.MarketplaceItemRequest;
 import org.example.pet_social.dto.MarketplaceItemResponse;
 import org.example.pet_social.dto.UiFormat;
@@ -46,7 +47,7 @@ public class MarketplaceController {
     }
 
     @PostMapping
-    public ResponseEntity<MarketplaceItemResponse> create(@RequestBody MarketplaceItemRequest req) {
+    public ResponseEntity<MarketplaceItemResponse> create(@Valid @RequestBody MarketplaceItemRequest req) {
         User seller = userService.getUserById(req.sellerId());
         if (seller == null || req.name() == null || req.price() == null || req.category() == null) {
             return ResponseEntity.badRequest().build();
