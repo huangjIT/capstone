@@ -1,30 +1,27 @@
 package org.example.pet_social.repository;
 
 import org.example.pet_social.entity.Friendship;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.repository.query.Param;
+import org.springframework.data.mongodb.repository.MongoRepository;
+import org.springframework.data.mongodb.repository.Query;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.Optional;
 
 @Repository
-public interface FriendshipRepository extends JpaRepository<Friendship, Long> {
+public interface FriendshipRepository extends MongoRepository<Friendship, String> {
+    @Query("{ $or: [{ 'userId': ?0 }, { 'friendId': ?0 }], 'status': ?1 }")
+    List<Friendship> findByUserIdAndStatus(String userId, String status);
 
-    // Find all friendships for a user (both directions)
-    @Query("SELECT f FROM Friendship f WHERE (f.user.id = :userId OR f.friend.id = :userId) AND f.status = :status")
-    List<Friendship> findByUserIdAndStatus(@Param("userId") Long userId, @Param("status") String status);
+    @Query("{ 'friendId': ?0, 'status': 'PENDING' }")
+    List<Friendship> findPendingRequestsForUser(String userId);
 
-    // Find pending friend requests received by a user
-    @Query("SELECT f FROM Friendship f WHERE f.friend.id = :userId AND f.status = 'PENDING'")
-    List<Friendship> findPendingRequestsForUser(@Param("userId") Long userId);
+    @Query("{ 'userId': ?0, 'status': 'PENDING' }")
+    List<Friendship> findPendingRequestsByUser(String userId);
 
-    // Find pending friend requests sent by a user
-    @Query("SELECT f FROM Friendship f WHERE f.user.id = :userId AND f.status = 'PENDING'")
-    List<Friendship> findPendingRequestsByUser(@Param("userId") Long userId);
+    @Query("{ $or: [{ 'userId': ?0, 'friendId': ?1 }, { 'userId': ?1, 'friendId': ?0 }] }")
+    Optional<Friendship> findFriendshipBetween(String userId1, String userId2);
 
-    // Check if friendship exists between two users (either direction)
-    @Query("SELECT f FROM Friendship f WHERE ((f.user.id = :userId1 AND f.friend.id = :userId2) OR (f.user.id = :userId2 AND f.friend.id = :userId1))")
-    Optional<Friendship> findFriendshipBetween(@Param("userId1") Long userId1, @Param("userId2") Long userId2);
+    @Query(value = "{ $or: [{ 'userId': ?0 }, { 'friendId': ?0 }], 'status': 'ACCEPTED' }", count = true)
+    long countFriendsByUserId(String userId);
 }

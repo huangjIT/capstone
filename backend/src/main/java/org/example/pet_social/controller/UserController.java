@@ -1,42 +1,73 @@
 package org.example.pet_social.controller;
 
+import org.example.pet_social.auth.JwtUtil;
 import org.example.pet_social.entity.User;
-import org.example.pet_social.service.UserRegistryService;
+import org.example.pet_social.repository.FriendshipRepository;
+import org.example.pet_social.repository.PetRepository;
+import org.example.pet_social.repository.PostRepository;
+import org.example.pet_social.repository.UserRepository;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
-/**
- * HTTP layer for user registration.
- *
- * Keep this controller thin:
- * - receive the request
- * - delegate orchestration to UserRegistryService
- * - return the saved user
- */
+import java.util.Map;
+
 @RestController
-@RequestMapping({"/api/users"})
+@RequestMapping("/api/users")
 public class UserController {
 
-    private final UserRegistryService userRegistryService;
+    private final UserRepository userRepository;
+    private final PostRepository postRepository;
+    private final PetRepository petRepository;
+    private final FriendshipRepository friendshipRepository;
+    private final JwtUtil jwtUtil;
 
-    public UserController(UserRegistryService userRegistryService) {
-        this.userRegistryService = userRegistryService;
+    public UserController(UserRepository userRepository, PostRepository postRepository,
+                          PetRepository petRepository, FriendshipRepository friendshipRepository,
+                          JwtUtil jwtUtil) {
+        this.userRepository = userRepository;
+        this.postRepository = postRepository;
+        this.petRepository = petRepository;
+        this.friendshipRepository = friendshipRepository;
+        this.jwtUtil = jwtUtil;
     }
 
-    /**
-     * Register a user.
-     *
-     * Flow:
-     * 1) Save user in DB
-     * 2) Initialize Redis runtime state
-     * 3) Return the saved user
-     */
-    @PostMapping("/register")
-    public ResponseEntity<User> registerUser(@RequestBody User user) {
-        User savedUser = userRegistryService.registerUser(user);
-        return ResponseEntity.ok(savedUser);
+    @GetMapping("/me")
+    public ResponseEntity<?> getMe(@RequestHeader("Authorization") String authHeader) {
+        User user = resolveUser(authHeader);
+        if (user == null) return ResponseEntity.status(401).body("Unauthorized");
+        user.setPassword(null);
+        return ResponseEntity.ok(user);
+    }
+
+    @PutMapping("/me")
+    public ResponseEntity<?> updateMe(@RequestHeader("Authorization") String authHeader,
+                                      @RequestBody Map<String, String> body) {
+        User user = resolveUser(authHeader);
+        if (user == null) return ResponseEntity.status(401).body("Unauthorized");
+        if (body.containsKey("name")) user.setName(body.get("name"));
+        if (body.containsKey("bio")) user.setBio(body.get("bio"));
+        if (body.containsKey("location")) user.setLocation(body.get("location"));
+        if (body.containsKey("avatarUrl")) user.setAvatarUrl(body.get("avatarUrl"));
+        userRepository.save(user);
+        user.setPassword(null);
+        return ResponseEntity.ok(user);
+    }
+
+    @GetMapping("/me/stats")
+    public ResponseEntity<?> getMyStats(@RequestHeader("Authorization") String authHeader) {
+        User user = resolveUser(authHeader);
+        if (user == null) return ResponseEntity.status(401).body("Unauthorized");
+        long posts = postRepository.countByUserId(user.getId());
+        long pets = petRepository.countByOwnerId(user.getId());
+        long friends = friendshipRepository.countFriendsByUserId(user.getId());
+        return ResponseEntity.ok(Map.of("posts", posts, "pets", pets, "friends", friends));
+    }
+
+    private User resolveUser(String authHeader) {
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) return null;
+        String token = authHeader.substring(7);
+        if (!jwtUtil.isValid(token)) return null;
+        String email = jwtUtil.extractEmail(token);
+        return userRepository.findByEmail(email).orElse(null);
     }
 }

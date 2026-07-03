@@ -1,76 +1,46 @@
 package org.example.pet_social.entity;
 
-import jakarta.persistence.*;
+import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
+import org.springframework.data.mongodb.core.index.Indexed;
+import org.springframework.data.mongodb.core.mapping.Document;
 import java.time.LocalDateTime;
 
-@Entity
-@Table(name = "friendships",
-    uniqueConstraints = {
-        @UniqueConstraint(columnNames = {"user_id", "friend_id"})
-    },
-    indexes = {
-        @Index(name = "idx_friendships_user", columnList = "user_id,status"),
-        @Index(name = "idx_friendships_friend", columnList = "friend_id,status")
-    })
+@Document(collection = "friendships")
+@CompoundIndex(name = "idx_user_friend_unique", def = "{'userId': 1, 'friendId': 1}", unique = true)
 public class Friendship {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "friendships_seq")
-    @SequenceGenerator(name = "friendships_seq", sequenceName = "friendships_seq", allocationSize = 50)
-    private Long id;
+    private String id;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_id", nullable = false, foreignKey = @ForeignKey(name = "fk_friendships_user"))
-    private User user; // User who initiated or is part of the friendship
+    @Indexed
+    private String userId;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "friend_id", nullable = false, foreignKey = @ForeignKey(name = "fk_friendships_friend"))
-    private User friend; // The other user in the friendship
+    @Indexed
+    private String friendId;
 
-    @Column(nullable = false)
-    private String status; // PENDING, ACCEPTED, BLOCKED
-
-    @Column(name = "created_at", updatable = false)
+    private String status;
     private LocalDateTime createdAt;
-
-    @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
-    @PrePersist
-    protected void onCreate() {
+    public Friendship() {}
+
+    public Friendship(String userId, String friendId, String status) {
+        this.userId = userId;
+        this.friendId = friendId;
+        this.status = status;
         this.createdAt = LocalDateTime.now();
         this.updatedAt = LocalDateTime.now();
     }
 
-    @PreUpdate
-    protected void onUpdate() {
-        this.updatedAt = LocalDateTime.now();
-    }
-
-    // Default constructor
-    public Friendship() {}
-
-    // Constructor with essential fields
-    public Friendship(User user, User friend, String status) {
-        this.user = user;
-        this.friend = friend;
-        this.status = status;
-    }
-
-    // Getters and Setters
-    public Long getId() { return id; }
-
-    public User getUser() { return user; }
-    public void setUser(User user) { this.user = user; }
-    public Long getUserId() { return user != null ? user.getId() : null; }
-
-    public User getFriend() { return friend; }
-    public void setFriend(User friend) { this.friend = friend; }
-    public Long getFriendId() { return friend != null ? friend.getId() : null; }
-
+    public String getId() { return id; }
+    public String getUserId() { return userId; }
+    public void setUserId(String userId) { this.userId = userId; }
+    public String getFriendId() { return friendId; }
+    public void setFriendId(String friendId) { this.friendId = friendId; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
-
     public LocalDateTime getCreatedAt() { return createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
+    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
 }

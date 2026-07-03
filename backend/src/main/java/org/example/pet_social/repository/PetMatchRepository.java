@@ -1,32 +1,24 @@
 package org.example.pet_social.repository;
 
 import org.example.pet_social.entity.PetMatch;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.repository.query.Param;
+import org.springframework.data.mongodb.repository.MongoRepository;
+import org.springframework.data.mongodb.repository.Query;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.Optional;
 
 @Repository
-public interface PetMatchRepository extends JpaRepository<PetMatch, Long> {
+public interface PetMatchRepository extends MongoRepository<PetMatch, String> {
+    @Query("{ $or: [{ 'petId1': ?0 }, { 'petId2': ?0 }] }")
+    List<PetMatch> findMatchesForPet(String petId);
 
-    // Find all matches for a pet (either direction)
-    @Query("SELECT pm FROM PetMatch pm WHERE pm.pet1.id = :petId OR pm.pet2.id = :petId")
-    List<PetMatch> findMatchesForPet(@Param("petId") Long petId);
+    @Query("{ $or: [{ 'petId1': ?0 }, { 'petId2': ?0 }], 'matchStatus': ?1 }")
+    List<PetMatch> findMatchesForPetByStatus(String petId, String status);
 
-    // Find matches by status
-    @Query("SELECT pm FROM PetMatch pm WHERE (pm.pet1.id = :petId OR pm.pet2.id = :petId) AND pm.matchStatus = :status")
-    List<PetMatch> findMatchesForPetByStatus(@Param("petId") Long petId, @Param("status") String status);
+    @Query("{ $or: [{ 'petId1': ?0, 'petId2': ?1 }, { 'petId1': ?1, 'petId2': ?0 }] }")
+    Optional<PetMatch> findMatchBetweenPets(String petId1, String petId2);
 
-    // Find match between two pets (either direction)
-    @Query("SELECT pm FROM PetMatch pm WHERE (pm.pet1.id = :petId1 AND pm.pet2.id = :petId2) OR (pm.pet1.id = :petId2 AND pm.pet2.id = :petId1)")
-    Optional<PetMatch> findMatchBetweenPets(@Param("petId1") Long petId1, @Param("petId2") Long petId2);
-
-    // Find all pending matches initiated by a user
-    List<PetMatch> findByInitiatedByUser_IdAndMatchStatus(Long initiatedByUserId, String matchStatus);
-
-    // Find matches by type
+    List<PetMatch> findByInitiatedByUserIdAndMatchStatus(String initiatedByUserId, String matchStatus);
     List<PetMatch> findByMatchType(String matchType);
 }

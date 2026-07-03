@@ -2,6 +2,7 @@
   "expo": {
     "name": "mobile",
     "slug": "mobile",
+    "scheme": "pawpal",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -10,9 +11,11 @@
       "supportsTablet": true,
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "PawPal needs your location to show nearby pets and walking partners.",
+        "NSPhotoLibraryUsageDescription": "PawPal needs access to your photo library to upload profile and pet photos.",
+        "NSCameraUsageDescription": "PawPal needs camera access to take profile and pet photos.",
         "ITSAppUsesNonExemptEncryption": false
       },
-      "bundleIdentifier": "com.anonymous.mobile"
+      "bundleIdentifier": "com.pawpal.app"
     },
     "android": {
       "adaptiveIcon": {
@@ -29,9 +32,11 @@
       },
       "permissions": [
         "ACCESS_FINE_LOCATION",
-        "ACCESS_COARSE_LOCATION"
+        "ACCESS_COARSE_LOCATION",
+        "READ_MEDIA_IMAGES",
+        "READ_EXTERNAL_STORAGE"
       ],
-      "package": "com.anonymous.mobile"
+      "package": "com.pawpal.app"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -40,6 +45,14 @@
       "eas": {
         "projectId": "d4acc4d5-1406-497e-a826-042be7fc9f4d"
       }
-    }
+    },
+    "plugins": [
+      "expo-dev-client",
+      "expo-web-browser",
+      "@react-native-google-signin/google-signin",
+      "expo-image-picker",
+      "expo-location",
+      "@react-native-community/datetimepicker"
+    ]
   }
 }

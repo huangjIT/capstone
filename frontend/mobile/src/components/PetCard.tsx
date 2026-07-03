@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
 import { COLORS } from '../constants/colors';
 
 interface PetCardProps {
@@ -15,8 +15,13 @@ interface PetCardProps {
   online?: boolean;
   onConnect?: () => void;
   onHeart?: () => void;
+  onMessage?: () => void;
+  onPress?: () => void;
   variant?: 'connect' | 'heart';
   gender?: string;
+  photoUrl?: string;
+  connectStatus?: 'default' | 'requested' | 'rejected' | 'accepted';
+  messageCount?: number;
 }
 
 export const PetCard: React.FC<PetCardProps> = ({
@@ -32,15 +37,34 @@ export const PetCard: React.FC<PetCardProps> = ({
   online = true,
   onConnect,
   onHeart,
+  onMessage,
+  onPress,
   variant = 'connect',
   gender,
+  photoUrl,
+  connectStatus = 'default',
+  messageCount,
 }) => {
   return (
-    <View style={styles.card}>
+    <TouchableOpacity
+      style={styles.card}
+      onPress={onPress}
+      disabled={!onPress}
+      activeOpacity={0.85}
+    >
+      {/* Unread message red dot — absolute top-right corner */}
+      {messageCount != null && messageCount > 0 && (
+        <TouchableOpacity style={styles.msgDot} onPress={onMessage} activeOpacity={0.75} />
+      )}
+
       {/* Left: Avatar with status dot */}
       <View style={styles.avatarWrap}>
         <View style={styles.avatar}>
-          <Text style={styles.avatarEmoji}>{emoji}</Text>
+          {photoUrl ? (
+            <Image source={{ uri: photoUrl }} style={styles.avatarImage} />
+          ) : (
+            <Text style={styles.avatarEmoji}>{emoji}</Text>
+          )}
         </View>
         <View style={[styles.statusDot, online ? styles.statusOnline : styles.statusOffline]} />
       </View>
@@ -71,16 +95,44 @@ export const PetCard: React.FC<PetCardProps> = ({
       {/* Right: Action button */}
       <View style={styles.actionWrap}>
         {variant === 'connect' ? (
-          <TouchableOpacity style={styles.connectBtn} onPress={onConnect}>
-            <Text style={styles.connectBtnText}>Connect</Text>
-          </TouchableOpacity>
+          connectStatus === 'rejected' ? (
+            <View style={styles.rejectedBtn}>
+              <Text style={styles.rejectedBtnText}>✗ Rejected</Text>
+            </View>
+          ) : connectStatus === 'accepted' ? (
+            <View style={styles.acceptedBtn}>
+              <Text style={styles.acceptedBtnText}>✓ Accepted</Text>
+            </View>
+          ) : connectStatus === 'requested' ? (
+            <View style={styles.requestedBtn}>
+              <Text style={styles.requestedBtnText}>Requested ✓</Text>
+            </View>
+          ) : (
+            <TouchableOpacity style={styles.connectBtn} onPress={onConnect}>
+              <Text style={styles.connectBtnText}>Connect</Text>
+            </TouchableOpacity>
+          )
         ) : (
-          <TouchableOpacity style={styles.heartBtn} onPress={onHeart}>
-            <Text style={styles.heartText}>💕</Text>
-          </TouchableOpacity>
+          connectStatus === 'rejected' ? (
+            <View style={styles.rejectedBtn}>
+              <Text style={styles.rejectedBtnText}>✗ Rejected</Text>
+            </View>
+          ) : connectStatus === 'accepted' ? (
+            <View style={styles.acceptedBtn}>
+              <Text style={styles.acceptedBtnText}>✓ Accepted</Text>
+            </View>
+          ) : connectStatus === 'requested' ? (
+            <View style={styles.requestedBtn}>
+              <Text style={styles.requestedBtnText}>Requested ✓</Text>
+            </View>
+          ) : (
+            <TouchableOpacity style={styles.heartBtn} onPress={onHeart}>
+              <Text style={styles.heartText}>💕</Text>
+            </TouchableOpacity>
+          )
         )}
       </View>
-    </View>
+    </TouchableOpacity>
   );
 };
 
@@ -116,6 +168,11 @@ const styles = StyleSheet.create({
   },
   avatarEmoji: {
     fontSize: 30,
+  },
+  avatarImage: {
+    width: 60,
+    height: 60,
+    borderRadius: 14,
   },
   statusDot: {
     position: 'absolute',
@@ -186,6 +243,57 @@ const styles = StyleSheet.create({
   connectBtnText: {
     color: '#FFFFFF',
     fontSize: 13,
+    fontWeight: '700',
+  },
+  msgDot: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#EF4444',
+    borderWidth: 2,
+    borderColor: COLORS.card,
+    zIndex: 10,
+  },
+  rejectedBtn: {
+    borderRadius: 100,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  rejectedBtnText: {
+    color: '#EF4444',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  acceptedBtn: {
+    borderRadius: 100,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#86EFAC',
+  },
+  acceptedBtnText: {
+    color: '#16A34A',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  requestedBtn: {
+    borderRadius: 100,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#86EFAC',
+  },
+  requestedBtnText: {
+    color: '#16A34A',
+    fontSize: 12,
     fontWeight: '700',
   },
   heartBtn: {

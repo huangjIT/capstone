@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
 import { COLORS } from '../constants/colors';
 import { Notification } from '../constants/mockData';
 
@@ -17,7 +17,13 @@ export const NotifItem: React.FC<NotifItemProps> = ({ item, onPress }) => {
     >
       <View style={styles.badgeWrap}>
         <View style={styles.badge}>
-          <Text style={styles.badgeEmoji}>{item.emoji}</Text>
+          {item.avatarUrl ? (
+            <Image source={{ uri: item.avatarUrl }} style={styles.avatarImage} />
+          ) : (
+            <Text style={styles.badgeInitial}>
+              {item.senderName?.[0]?.toUpperCase() ?? '?'}
+            </Text>
+          )}
         </View>
         <View style={styles.petBadge}>
           <Text style={styles.petEmoji}>{item.petEmoji}</Text>
@@ -73,9 +79,19 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.primaryLight,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
   badgeEmoji: {
     fontSize: 20,
+  },
+  badgeInitial: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  avatarImage: {
+    width: 44,
+    height: 44,
   },
   petBadge: {
     position: 'absolute',

@@ -3,36 +3,32 @@ package org.example.pet_social.repository;
 import org.example.pet_social.entity.Message;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.repository.query.Param;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.mongodb.repository.MongoRepository;
+import org.springframework.data.mongodb.repository.Query;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
 
 @Repository
-public interface MessageRepository extends JpaRepository<Message, Long> {
+public interface MessageRepository extends MongoRepository<Message, String> {
+    @Query("{ $or: [{ 'senderId': ?0, 'receiverId': ?1 }, { 'senderId': ?1, 'receiverId': ?0 }] }")
+    Page<Message> findConversation(String userId1, String userId2, Pageable pageable);
 
-    // Find conversation between two users
-    @Query("SELECT m FROM Message m WHERE (m.sender.id = :userId1 AND m.receiver.id = :userId2) OR (m.sender.id = :userId2 AND m.receiver.id = :userId1) ORDER BY m.createdAt DESC")
-    Page<Message> findConversation(@Param("userId1") Long userId1, @Param("userId2") Long userId2, Pageable pageable);
+    @Query("{ $or: [{ 'senderId': ?0, 'receiverId': ?1 }, { 'senderId': ?1, 'receiverId': ?0 }] }")
+    List<Message> findConversationSorted(String userId1, String userId2, Sort sort);
 
-    // Find all messages sent by a user
-    List<Message> findBySender_Id(Long senderId);
+    List<Message> findByWalkRequestIdOrderByCreatedAtAsc(String walkRequestId);
 
-    // Find all messages received by a user
-    List<Message> findByReceiver_Id(Long receiverId);
-
-    // Find unread messages for a user
-    List<Message> findByReceiver_IdAndIsRead(Long receiverId, Boolean isRead);
-
-    // Count unread messages
-    Long countByReceiver_IdAndIsRead(Long receiverId, Boolean isRead);
-
-    // Find recent conversations for a user (unique conversation partners)
-    @Query(value = "SELECT DISTINCT ON (CASE WHEN sender_id = :userId THEN receiver_id ELSE sender_id END) * " +
-                   "FROM messages WHERE sender_id = :userId OR receiver_id = :userId " +
-                   "ORDER BY CASE WHEN sender_id = :userId THEN receiver_id ELSE sender_id END, created_at DESC",
-           nativeQuery = true)
-    List<Message> findRecentConversations(@Param("userId") Long userId);
+    List<Message> findBySenderId(String senderId);
+    List<Message> findByReceiverId(String receiverId);
+    List<Message> findByReceiverIdAndIsRead(String receiverId, Boolean isRead);
+    Long countByReceiverIdAndIsRead(String receiverId, Boolean isRead);
+    long countByWalkRequestIdAndReceiverIdAndIsRead(String walkRequestId, String receiverId, Boolean isRead);
+    long countByTypeAndWalkInvitationIdAndReceiverIdAndIsRead(String type, String walkInvitationId, String receiverId, Boolean isRead);
+    long countByTypeAndDateInvitationIdAndReceiverIdAndIsRead(String type, String dateInvitationId, String receiverId, Boolean isRead);
+    List<Message> findByDateRequestIdOrderByCreatedAtAsc(String dateRequestId);
+    List<Message> findByMarketItemIdOrderByCreatedAtAsc(String marketItemId);
+    long countByTypeAndMarketItemIdAndReceiverIdAndIsRead(String type, String marketItemId, String receiverId, Boolean isRead);
+    long countByTypeAndReceiverIdAndIsRead(String type, String receiverId, Boolean isRead);
 }

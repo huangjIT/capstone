@@ -1,112 +1,61 @@
 package org.example.pet_social.entity;
 
-import jakarta.persistence.*;
+import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
+import org.springframework.data.mongodb.core.index.Indexed;
+import org.springframework.data.mongodb.core.mapping.Document;
 import java.time.LocalDateTime;
 
-@Entity
-@Table(name = "pet_matches",
-    uniqueConstraints = {
-        @UniqueConstraint(columnNames = {"pet_id_1", "pet_id_2"})
-    },
-    indexes = {
-        @Index(name = "idx_matches_pet1", columnList = "pet_id_1,match_status"),
-        @Index(name = "idx_matches_pet2", columnList = "pet_id_2,match_status"),
-        @Index(name = "idx_matches_initiator", columnList = "initiated_by_user_id")
-    })
+@Document(collection = "pet_matches")
+@CompoundIndex(name = "idx_pets_unique", def = "{'petId1': 1, 'petId2': 1}", unique = true)
 public class PetMatch {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "pet_matches_seq")
-    @SequenceGenerator(name = "pet_matches_seq", sequenceName = "pet_matches_seq", allocationSize = 50)
-    private Long id;
+    private String id;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "pet_id_1", nullable = false, foreignKey = @ForeignKey(name = "fk_pet_matches_pet1"))
-    private Pet pet1; // First pet in the match
+    @Indexed
+    private String petId1;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "pet_id_2", nullable = false, foreignKey = @ForeignKey(name = "fk_pet_matches_pet2"))
-    private Pet pet2; // Second pet in the match
+    @Indexed
+    private String petId2;
 
-    @Column(name = "match_status", nullable = false)
-    private String matchStatus; // PENDING, ACCEPTED, REJECTED, COMPLETED
-
-    @Column(name = "compatibility_score")
-    private Double compatibilityScore; // 0.0 to 1.0
-
-    @Column(name = "match_type")
-    private String matchType; // PLAYDATE, BREEDING, FRIENDSHIP
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "initiated_by_user_id", foreignKey = @ForeignKey(name = "fk_pet_matches_initiator"))
-    private User initiatedByUser;
-
-    @Column(name = "meeting_date")
+    private String matchStatus = "PENDING";
+    private Double compatibilityScore;
+    private String matchType;
+    private String initiatedByUserId;
     private LocalDateTime meetingDate;
-
-    @Column(length = 1000)
     private String notes;
-
-    @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
-
-    @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
-    @PrePersist
-    protected void onCreate() {
-        this.createdAt = LocalDateTime.now();
-        this.updatedAt = LocalDateTime.now();
-        if (this.matchStatus == null) {
-            this.matchStatus = "PENDING";
-        }
-    }
-
-    @PreUpdate
-    protected void onUpdate() {
-        this.updatedAt = LocalDateTime.now();
-    }
-
-    // Default constructor
     public PetMatch() {}
 
-    // Constructor with essential fields
-    public PetMatch(Pet pet1, Pet pet2, User initiatedByUser) {
-        this.pet1 = pet1;
-        this.pet2 = pet2;
-        this.initiatedByUser = initiatedByUser;
+    public PetMatch(String petId1, String petId2, String initiatedByUserId) {
+        this.petId1 = petId1;
+        this.petId2 = petId2;
+        this.initiatedByUserId = initiatedByUserId;
+        this.createdAt = LocalDateTime.now();
+        this.updatedAt = LocalDateTime.now();
     }
 
-    // Getters and Setters
-    public Long getId() { return id; }
-
-    public Pet getPet1() { return pet1; }
-    public void setPet1(Pet pet1) { this.pet1 = pet1; }
-    public Long getPetId1() { return pet1 != null ? pet1.getId() : null; }
-
-    public Pet getPet2() { return pet2; }
-    public void setPet2(Pet pet2) { this.pet2 = pet2; }
-    public Long getPetId2() { return pet2 != null ? pet2.getId() : null; }
-
+    public String getId() { return id; }
+    public String getPetId1() { return petId1; }
+    public void setPetId1(String petId1) { this.petId1 = petId1; }
+    public String getPetId2() { return petId2; }
+    public void setPetId2(String petId2) { this.petId2 = petId2; }
     public String getMatchStatus() { return matchStatus; }
     public void setMatchStatus(String matchStatus) { this.matchStatus = matchStatus; }
-
     public Double getCompatibilityScore() { return compatibilityScore; }
     public void setCompatibilityScore(Double compatibilityScore) { this.compatibilityScore = compatibilityScore; }
-
     public String getMatchType() { return matchType; }
     public void setMatchType(String matchType) { this.matchType = matchType; }
-
-    public User getInitiatedByUser() { return initiatedByUser; }
-    public void setInitiatedByUser(User initiatedByUser) { this.initiatedByUser = initiatedByUser; }
-    public Long getInitiatedByUserId() { return initiatedByUser != null ? initiatedByUser.getId() : null; }
-
+    public String getInitiatedByUserId() { return initiatedByUserId; }
+    public void setInitiatedByUserId(String initiatedByUserId) { this.initiatedByUserId = initiatedByUserId; }
     public LocalDateTime getMeetingDate() { return meetingDate; }
     public void setMeetingDate(LocalDateTime meetingDate) { this.meetingDate = meetingDate; }
-
     public String getNotes() { return notes; }
     public void setNotes(String notes) { this.notes = notes; }
-
     public LocalDateTime getCreatedAt() { return createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
+    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
 }

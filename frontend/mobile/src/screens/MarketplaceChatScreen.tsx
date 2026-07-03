@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,52 +7,39 @@ import {
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
+  Image,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/colors';
 import { ChatBubble } from '../components/ChatBubble';
 import { ChatInputBar } from '../components/ChatInputBar';
+import { apiGet, apiPost } from '../utils/api';
+import { categoryEmoji, conditionLabel } from './MarketplaceScreen';
 
 interface MarketplaceChatScreenProps {
   navigation: any;
   route: any;
 }
 
-const CHAT_MESSAGES = [
-  {
-    id: '1',
-    message: "Hi! Is the pet carrier still available? I'm interested for my cat Luna 🐱",
-    isOwn: false,
-    time: '10:14 AM',
-    avatar: '👩',
-  },
-  {
-    id: '2',
-    message: "Yes it's still available! Great condition, only used a few times. The dimensions are 45x30x28cm — fits most cats and small dogs comfortably.",
-    isOwn: true,
-    time: '10:17 AM',
-  },
-  {
-    id: '3',
-    message: 'Would you accept $20? I can pick up today if that works!',
-    isOwn: false,
-    time: '10:19 AM',
-    avatar: '👩',
-  },
-  {
-    id: '4',
-    message: "Best I can do is $22 — it's basically new and I paid $60. I'm free this afternoon around 3pm or 5pm.",
-    isOwn: true,
-    time: '10:22 AM',
-  },
-  {
-    id: '5',
-    message: "Deal! $22 works for me. Let's meet at 5pm at the Golden Gate Park entrance? 📍",
-    isOwn: false,
-    time: '10:24 AM',
-    avatar: '👩',
-  },
-];
+interface ChatMessage {
+  id: string;
+  senderId: string;
+  receiverId: string;
+  content: string;
+  createdAt: string;
+  isOwn: boolean;
+  senderName?: string;
+  senderAvatarUrl?: string;
+}
+
+function formatTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  } catch {
+    return '';
+  }
+}
 
 export const MarketplaceChatScreen: React.FC<MarketplaceChatScreenProps> = ({
   navigation,
@@ -60,6 +47,57 @@ export const MarketplaceChatScreen: React.FC<MarketplaceChatScreenProps> = ({
 }) => {
   const insets = useSafeAreaInsets();
   const item = route?.params?.item;
+  const otherUserId: string | undefined = route?.params?.otherUserId ?? item?.sellerUserId;
+  const otherUserNameParam: string | undefined = route?.params?.otherUserName ?? item?.sellerName;
+  const otherUserAvatarParam: string | undefined = route?.params?.otherUserAvatarUrl ?? item?.sellerAvatarUrl;
+
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const scrollRef = useRef<ScrollView>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Fallback: derive the other party's info from the first incoming message
+  const firstIncoming = messages.find(m => !m.isOwn);
+  const otherName = otherUserNameParam || firstIncoming?.senderName || 'Seller';
+  const otherAvatarUrl = otherUserAvatarParam || firstIncoming?.senderAvatarUrl;
+
+  const fetchMessages = useCallback(async () => {
+    if (!item?.id || !otherUserId) return;
+    try {
+      const data = await apiGet<ChatMessage[]>(`/api/messages/market-item/${item.id}/${otherUserId}`);
+      setMessages(data);
+    } catch (_) {}
+  }, [item?.id, otherUserId]);
+
+  useEffect(() => {
+    fetchMessages();
+    intervalRef.current = setInterval(fetchMessages, 1000);
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [fetchMessages]);
+
+  useEffect(() => {
+    if (messages.length > 0) {
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+    }
+  }, [messages.length]);
+
+  const handleSend = useCallback(async (text: string) => {
+    if (!otherUserId || !item?.id || !text.trim()) return;
+    try {
+      const sent = await apiPost<ChatMessage>('/api/messages', {
+        receiverId: otherUserId,
+        content: text.trim(),
+        marketItemId: item.id,
+      });
+      setMessages(prev => [...prev, sent]);
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Failed to send message');
+    }
+  }, [otherUserId, item?.id]);
+
+  const isSold = item?.status === 'SOLD';
 
   return (
     <KeyboardAvoidingView
@@ -73,22 +111,27 @@ export const MarketplaceChatScreen: React.FC<MarketplaceChatScreenProps> = ({
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <View style={styles.headerAvatar}>
-            <Text style={styles.headerAvatarText}>👤</Text>
+            {otherAvatarUrl ? (
+              <Image source={{ uri: otherAvatarUrl }} style={styles.headerAvatarImg} />
+            ) : (
+              <Text style={styles.headerAvatarText}>
+                {otherName?.[0]?.toUpperCase() ?? '👤'}
+              </Text>
+            )}
           </View>
           <View>
-            <Text style={styles.headerName}>Alex M.</Text>
+            <Text style={styles.headerName}>{otherName}</Text>
             <View style={styles.onlineRow}>
               <View style={styles.onlineDot} />
               <Text style={styles.onlineText}>Online now</Text>
             </View>
           </View>
         </View>
-        <TouchableOpacity style={styles.backBtn}>
-          <Text style={styles.moreText}>⋯</Text>
-        </TouchableOpacity>
+        <View style={styles.backBtn} />
       </View>
 
       <ScrollView
+        ref={scrollRef}
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
@@ -98,44 +141,52 @@ export const MarketplaceChatScreen: React.FC<MarketplaceChatScreenProps> = ({
         <View style={styles.itemCard}>
           <View style={styles.itemCardInner}>
             <View style={styles.itemImageBox}>
-              <Text style={styles.itemEmoji}>{item?.emoji || '🎒'}</Text>
+              {item?.photoUrl ? (
+                <Image source={{ uri: item.photoUrl }} style={styles.itemPhoto} />
+              ) : (
+                <Text style={styles.itemEmoji}>{categoryEmoji(item?.category)}</Text>
+              )}
             </View>
             <View style={styles.itemDetails}>
-              <Text style={styles.itemName}>{item?.name || 'Pet Carrier Bag'}</Text>
-              <Text style={styles.itemCondition}>Condition: {item?.condition || 'Good'} · 3 uses</Text>
+              <Text style={styles.itemName}>{item?.name || 'Item'}</Text>
+              {item?.condition ? (
+                <Text style={styles.itemCondition}>Condition: {conditionLabel(item.condition)}</Text>
+              ) : null}
               <View style={styles.itemPriceRow}>
-                <Text style={styles.itemPrice}>${item?.price || 25}</Text>
-                {(item?.originalPrice || 60) && (
-                  <Text style={styles.itemOriginalPrice}>${item?.originalPrice || 60}</Text>
+                <Text style={styles.itemPrice}>${item?.price ?? 0}</Text>
+                {item?.originalPrice != null && (
+                  <Text style={styles.itemOriginalPrice}>${item.originalPrice}</Text>
                 )}
-                <View style={styles.availableBadge}>
-                  <View style={styles.availableDot} />
-                  <Text style={styles.availableText}>Available</Text>
+                <View style={[styles.availableBadge, isSold && styles.soldBadge]}>
+                  <View style={[styles.availableDot, isSold && styles.soldDot]} />
+                  <Text style={[styles.availableText, isSold && styles.soldBadgeText]}>
+                    {isSold ? 'Sold' : 'Available'}
+                  </Text>
                 </View>
               </View>
             </View>
           </View>
         </View>
 
-        {/* Timestamp */}
-        <View style={styles.timestampRow}>
-          <Text style={styles.timestampText}>Today, 10:14 AM</Text>
-        </View>
-
         {/* Chat Messages */}
-        {CHAT_MESSAGES.map((msg) => (
-          <ChatBubble
-            key={msg.id}
-            message={msg.message}
-            timestamp={msg.time}
-            isOwn={msg.isOwn}
-            avatarEmoji={msg.avatar}
-          />
-        ))}
+        {messages.length === 0 ? (
+          <Text style={styles.emptyChatText}>No messages yet. Ask about the item!</Text>
+        ) : (
+          messages.map((msg) => (
+            <ChatBubble
+              key={msg.id}
+              message={msg.content}
+              timestamp={formatTime(msg.createdAt)}
+              isOwn={msg.isOwn}
+              avatarUrl={msg.isOwn ? undefined : msg.senderAvatarUrl}
+              avatarEmoji={msg.isOwn ? undefined : '👤'}
+            />
+          ))
+        )}
       </ScrollView>
 
       {/* Chat Input */}
-      <ChatInputBar />
+      <ChatInputBar onSend={handleSend} />
     </KeyboardAvoidingView>
   );
 };
@@ -165,10 +216,6 @@ const styles = StyleSheet.create({
     fontSize: 22,
     color: COLORS.primary,
   },
-  moreText: {
-    fontSize: 22,
-    color: COLORS.textSub,
-  },
   headerCenter: {
     flex: 1,
     flexDirection: 'row',
@@ -180,14 +227,18 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 19,
-    backgroundColor: COLORS.bg,
+    backgroundColor: COLORS.primaryLight,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: COLORS.border,
+    overflow: 'hidden',
   },
+  headerAvatarImg: { width: '100%', height: '100%' },
   headerAvatarText: {
-    fontSize: 20,
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.primary,
   },
   headerName: {
     fontSize: 15,
@@ -241,7 +292,9 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.bg,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
+  itemPhoto: { width: '100%', height: '100%' },
   itemEmoji: {
     fontSize: 38,
   },
@@ -296,14 +349,16 @@ const styles = StyleSheet.create({
     color: COLORS.primary,
     fontWeight: '600',
   },
-  timestampRow: {
-    alignItems: 'center',
-    marginVertical: 6,
+  soldBadge: {
+    backgroundColor: '#F3F4F6',
+    borderColor: COLORS.border,
   },
-  timestampText: {
-    fontSize: 12,
+  soldDot: { backgroundColor: COLORS.textMuted },
+  soldBadgeText: { color: COLORS.textMuted },
+  emptyChatText: {
+    textAlign: 'center',
     color: COLORS.textMuted,
-    backgroundColor: COLORS.bg,
-    paddingHorizontal: 12,
+    fontSize: 13,
+    paddingVertical: 24,
   },
 });

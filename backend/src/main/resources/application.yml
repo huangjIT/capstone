@@ -1,4 +1,3 @@
-
 server:
   port: 8080
 
@@ -14,66 +13,13 @@ management:
   endpoint:
     prometheus:
       enabled: true
+  health:
+    mongodb:
+      enabled: false
 
 spring:
   application:
     name: pet_social
 
-  # PostgreSQL Configuration
-  datasource:
-    url: jdbc:postgresql://localhost:5432/pet_social_db
-    username: admin
-    password: rootpassword
-    driver-class-name: org.postgresql.Driver
-    hikari:
-      maximum-pool-size: 20 # starting point; tune against the Sprint 4 load test
-      minimum-idle: 5
-
-  jpa:
-    hibernate:
-      ddl-auto: update # Automatically updates DB schema based on your Java entities
-    show-sql: true # Prints SQL queries to the console for easy debugging
-    properties:
-      hibernate:
-        format_sql: true
-        jdbc:
-          batch_size: 50 # requires SEQUENCE-based ids (set on all entities) - IDENTITY disables batching
-        order_inserts: true
-        order_updates: true
-
-  # Redis Configuration
-  data:
-    redis:
-      host: localhost
-      port: 6379
-      lettuce:
-        pool:
-          # Must exceed the Kafka listener concurrency (8) so each consumer thread can hold
-          # its own connection during executePipelined() instead of serializing on a shared one.
-          max-active: 16
-          max-idle: 16
-          min-idle: 4
-          max-wait: 1000ms
-
-  # Kafka Configuration
-  kafka:
-    bootstrap-servers: localhost:9092
-    producer:
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      # MUST BE JSON
-      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
-    listener:
-      # Single @KafkaListener in the app (TelemetryConsumerService) is written for batch mode -
-      # with the user-telemetry topic at 1 partition, batching is how we maximize throughput
-      # on a single partition before scaling out partitions/brokers.
-      type: batch
-    consumer:
-      group-id: dispatch-group
-      auto-offset-reset: earliest
-      max-poll-records: 1000
-      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      # MUST BE JSON
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
-      properties:
-        # Security requirement to allow JSON to convert into your DTOs
-        spring.json.trusted.packages: "*"
+  mongodb:
+    uri: mongodb+srv://fullstack:hJYJcYodFplubsCf@cluster0.3tdoumf.mongodb.net/pet_social_db
