@@ -34,6 +34,7 @@ public class MatchingService {
 
     private static final String GEO_KEY = "users:geo";
     private static final String META_PREFIX = "users:meta:";
+    private static final int MAX_CANDIDATES_PER_RADIUS = 100;
 
     // SLA expansion radii in meters.
     private final List<Double> radiiMeters = List.of(2000.0, 5000.0, 10000.0);
@@ -61,11 +62,16 @@ public class MatchingService {
     private Optional<Long> findNearestMatchInternal(double latitude, double longitude, long requiredPreferencesMask) {
         Point point = new Point(longitude, latitude);
 
+        // Sorted nearest-first so the first candidate that passes the filters really is the
+        // nearest match, and capped so one request never walks an unbounded geo result set.
+        RedisGeoCommands.GeoRadiusCommandArgs args = RedisGeoCommands.GeoRadiusCommandArgs
+                .newGeoRadiusArgs().sortAscending().limit(MAX_CANDIDATES_PER_RADIUS);
+
         for (double radiusMeters : radiiMeters) {
             // Redis geo radius search in kilometers.
             Circle radius = new Circle(point, new Distance(radiusMeters / 1000.0, Metrics.KILOMETERS));
 
-            GeoResults<RedisGeoCommands.GeoLocation<String>> results = geoOps.radius(GEO_KEY, radius);
+            GeoResults<RedisGeoCommands.GeoLocation<String>> results = geoOps.radius(GEO_KEY, radius, args);
 
             if (results == null || results.getContent().isEmpty()) {
                 continue;
