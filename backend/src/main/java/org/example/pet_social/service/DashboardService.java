@@ -1,5 +1,9 @@
 package org.example.pet_social.service;
 
+import org.example.pet_social.repository.MessageRepository;
+import org.example.pet_social.repository.NotificationRepository;
+import org.example.pet_social.repository.PetMatchRepository;
+import org.example.pet_social.repository.PetRepository;
 import org.example.pet_social.repository.UserRepository;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -19,6 +23,10 @@ import java.util.Map;
 public class DashboardService {
 
     private final UserRepository userRepository;
+    private final PetRepository petRepository;
+    private final PetMatchRepository petMatchRepository;
+    private final MessageRepository messageRepository;
+    private final NotificationRepository notificationRepository;
     private final StringRedisTemplate redisTemplate;
     private final MeterRegistry meterRegistry;
 
@@ -31,8 +39,18 @@ public class DashboardService {
     private static final String MATCH_FAILED_KEY = "metrics:match:failed";
     private static final String GEO_KEY = "users:geo";
 
-    public DashboardService(UserRepository userRepository, StringRedisTemplate redisTemplate, MeterRegistry meterRegistry) {
+    public DashboardService(UserRepository userRepository,
+                            PetRepository petRepository,
+                            PetMatchRepository petMatchRepository,
+                            MessageRepository messageRepository,
+                            NotificationRepository notificationRepository,
+                            StringRedisTemplate redisTemplate,
+                            MeterRegistry meterRegistry) {
         this.userRepository = userRepository;
+        this.petRepository = petRepository;
+        this.petMatchRepository = petMatchRepository;
+        this.messageRepository = messageRepository;
+        this.notificationRepository = notificationRepository;
         this.redisTemplate = redisTemplate;
         this.meterRegistry = meterRegistry;
 
@@ -123,6 +141,14 @@ public class DashboardService {
             "totalProcessed", telemetryCount
         ));
 
+        // Social feature activity (pets/matches/messages tables added by the schema branch)
+        metrics.put("social", Map.of(
+            "pets", safeCount(petRepository::count),
+            "matches", safeCount(petMatchRepository::count),
+            "messages", safeCount(messageRepository::count),
+            "notifications", safeCount(notificationRepository::count)
+        ));
+
         metrics.put("matching", Map.of(
             "successfulMatches", matchSuccess,
             "failedMatches", matchFailed,
@@ -139,6 +165,14 @@ public class DashboardService {
         ));
 
         return metrics;
+    }
+
+    private long safeCount(java.util.function.LongSupplier counter) {
+        try {
+            return counter.getAsLong();
+        } catch (Exception e) {
+            return 0L;
+        }
     }
 
     /**

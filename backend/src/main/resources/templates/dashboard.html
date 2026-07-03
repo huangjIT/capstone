@@ -128,6 +128,10 @@
             border-left-color: #f59e0b;
         }
 
+        .metric-card.social {
+            border-left-color: #8b5cf6;
+        }
+
         .metric-label {
             color: #666;
             font-size: 0.9em;
@@ -310,6 +314,12 @@
                 <div class="metric-subvalue">Success Rate: <span id="successRate">-</span></div>
             </div>
 
+            <div class="metric-card social">
+                <div class="metric-label">Social Activity</div>
+                <div class="metric-value" id="totalPets">-</div>
+                <div class="metric-subvalue">Pets | Matches: <span id="totalMatches">-</span> | Messages: <span id="totalMessages">-</span></div>
+            </div>
+
             <div class="metric-card">
                 <div class="metric-label">System Status</div>
                 <div style="margin-top: 15px;">
@@ -340,6 +350,11 @@
                 <div class="chart-title">📈 Telemetry Trend</div>
                 <canvas id="telemetryTrendChart"></canvas>
             </div>
+
+            <div class="chart-container">
+                <div class="chart-title">🐾 Social Activity</div>
+                <canvas id="socialActivityChart"></canvas>
+            </div>
         </div>
 
         <!-- Status -->
@@ -359,7 +374,7 @@
     </div>
 
     <script>
-        let distributionChart, successRateChart, userStatusChart, telemetryTrendChart;
+        let distributionChart, successRateChart, userStatusChart, telemetryTrendChart, socialActivityChart;
         let telemetryHistory = [];
         const MAX_HISTORY = 20;
 
@@ -458,6 +473,29 @@
                     }
                 }
             });
+
+            // Social Activity Chart
+            const socialCtx = document.getElementById('socialActivityChart').getContext('2d');
+            socialActivityChart = new Chart(socialCtx, {
+                type: 'bar',
+                data: {
+                    labels: ['Pets', 'Matches', 'Messages', 'Notifications'],
+                    datasets: [{
+                        label: 'Records',
+                        data: [0, 0, 0, 0],
+                        backgroundColor: ['#8b5cf6', '#ec4899', '#3b82f6', '#f59e0b']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    }
+                }
+            });
         }
 
         // Update metrics
@@ -475,14 +513,20 @@
                 document.getElementById('successRate').textContent = data.matching.successRate;
                 document.getElementById('lastUpdate').textContent = new Date(data.summary.timestamp).toLocaleTimeString();
 
-                // Update charts
-                updateCharts(data);
+                if (data.social) {
+                    document.getElementById('totalPets').textContent = data.social.pets;
+                    document.getElementById('totalMatches').textContent = data.social.matches;
+                    document.getElementById('totalMessages').textContent = data.social.messages;
+                }
 
-                // Add to history
+                // Record the sample first so the trend chart includes this tick
                 telemetryHistory.push(data.telemetry.totalProcessed);
                 if (telemetryHistory.length > MAX_HISTORY) {
                     telemetryHistory.shift();
                 }
+
+                // Update charts
+                updateCharts(data);
 
                 addLog(`✅ Metrics updated - Users: ${data.users.total}, Telemetry: ${data.telemetry.totalProcessed}`);
             } catch (error) {
@@ -519,6 +563,17 @@
             telemetryTrendChart.data.labels = telemetryHistory.map((_, i) => `${i - telemetryHistory.length + 1}s`);
             telemetryTrendChart.data.datasets[0].data = telemetryHistory;
             telemetryTrendChart.update();
+
+            // Social Activity Chart
+            if (data.social) {
+                socialActivityChart.data.datasets[0].data = [
+                    data.social.pets,
+                    data.social.matches,
+                    data.social.messages,
+                    data.social.notifications
+                ];
+                socialActivityChart.update();
+            }
         }
 
         // API calls

@@ -13,12 +13,12 @@ import org.springframework.data.geo.GeoResults;
 import org.springframework.data.geo.Metrics;
 import org.springframework.data.geo.Point;
 import org.springframework.data.redis.connection.RedisGeoCommands;
-import org.springframework.data.redis.connection.StringRedisConnection;
 import org.springframework.data.redis.core.GeoOperations;
 import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -201,10 +201,12 @@ public class PetQueryService {
             return Set.of();
         }
         List<Long> ids = List.copyOf(ownerIds);
+        // Byte-level commands: the callback receives a plain RedisConnection proxy,
+        // not a StringRedisConnection, so string convenience methods aren't available
         List<Object> values = redis.executePipelined((RedisCallback<Object>) connection -> {
-            StringRedisConnection stringConn = (StringRedisConnection) connection;
+            byte[] field = "active".getBytes(StandardCharsets.UTF_8);
             for (Long id : ids) {
-                stringConn.hGet(META_PREFIX + id, "active");
+                connection.hashCommands().hGet((META_PREFIX + id).getBytes(StandardCharsets.UTF_8), field);
             }
             return null;
         });
