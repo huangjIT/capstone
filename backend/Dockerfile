@@ -37,7 +37,9 @@ EXPOSE 8080
 # 2. -Xms1g -Xmx2g: Hard-caps the heap memory. This prevents the JVM from infinitely
 #                   consuming RAM and triggering the Linux Out-Of-Memory (OOM) killer.
 # 3. -XX:+HeapDumpOnOutOfMemoryError: If it does crash under 50k load, this saves the evidence.
-ENV JAVA_OPTS="-XX:+UseZGC -Xms1g -Xmx2g -XX:+HeapDumpOnOutOfMemoryError -XX:MaxMetaspaceSize=256m"
+# -XX:MaxRAMPercentage adapts the heap to the container's memory limit,
+# so the same image works on any Cloud Run instance size (512MB, 1GB, 2GB...).
+ENV JAVA_OPTS="-XX:MaxRAMPercentage=75.0 -XX:+HeapDumpOnOutOfMemoryError -XX:MaxMetaspaceSize=256m"
 
 # Execute the application
 ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
