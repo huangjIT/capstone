@@ -17,9 +17,12 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Chat threads (walk request, blind date, marketplace, general DM) over the
@@ -87,13 +90,21 @@ public class MessageController {
     @GetMapping("/conversations")
     public List<ConversationResponse> conversations(HttpServletRequest request) {
         Long userId = authUserId(request);
-        return messageRepository.findRecentConversations(userId).stream()
+        List<Message> latest = messageRepository.findRecentConversations(userId);
+        // One IN-query for every partner's User row instead of a lazy load per conversation
+        Set<Long> partnerIds = latest.stream()
+                .map(m -> m.getSenderId().equals(userId) ? m.getReceiverId() : m.getSenderId())
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        Map<Long, User> partners = userService.getUsersByIds(partnerIds);
+
+        return latest.stream()
                 .map(m -> {
                     boolean mine = m.getSenderId().equals(userId);
-                    User other = mine ? m.getReceiver() : m.getSender();
+                    Long otherId = mine ? m.getReceiverId() : m.getSenderId();
+                    User other = partners.get(otherId);
                     return new ConversationResponse(
-                            other.getId(),
-                            other.getName(),
+                            otherId,
+                            other == null ? "" : other.getName(),
                             m.getContent(),
                             UiFormat.relativeTime(m.getCreatedAt()),
                             mine,

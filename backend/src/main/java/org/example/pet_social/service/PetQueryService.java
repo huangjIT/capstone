@@ -13,19 +13,32 @@ import org.springframework.data.geo.GeoResults;
 import org.springframework.data.geo.Metrics;
 import org.springframework.data.geo.Point;
 import org.springframework.data.redis.connection.RedisGeoCommands;
+import org.springframework.data.redis.connection.StringRedisConnection;
 import org.springframework.data.redis.core.GeoOperations;
+import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Read-side queries that power the mobile app's discovery screens.
  * Locations live in Redis (users:geo, written by the telemetry pipeline);
  * pet/owner profiles live in Postgres. This service joins the two and
  * returns DTOs shaped exactly like the frontend interfaces.
+ *
+ * Redis lookups (positions, online flags) and the Postgres pet fetch are
+ * batched per request — one round trip each — instead of per pet/user.
  */
 @Service
 public class PetQueryService {
@@ -54,14 +67,26 @@ public class PetQueryService {
             return List.of();
         }
 
-        List<NearbyPetResponse> out = new ArrayList<>();
+        // Geo hits in result order; one IN-query loads every hit's pets instead of a query per user.
+        Map<Long, Point> pointsByUser = new LinkedHashMap<>();
         for (GeoResult<RedisGeoCommands.GeoLocation<String>> result : results) {
             Long userId = parseLong(result.getContent().getName());
             Point point = result.getContent().getPoint();
-            if (userId == null || point == null) {
-                continue;
+            if (userId != null && point != null) {
+                pointsByUser.putIfAbsent(userId, point);
             }
-            for (Pet pet : petRepository.findWithOwnerByOwnerId(userId)) {
+        }
+        if (pointsByUser.isEmpty()) {
+            return List.of();
+        }
+
+        Map<Long, List<Pet>> petsByOwner = petRepository.findWithOwnerByOwnerIdIn(pointsByUser.keySet())
+                .stream().collect(Collectors.groupingBy(Pet::getOwnerId));
+
+        List<NearbyPetResponse> out = new ArrayList<>();
+        for (Map.Entry<Long, Point> entry : pointsByUser.entrySet()) {
+            Point point = entry.getValue();
+            for (Pet pet : petsByOwner.getOrDefault(entry.getKey(), List.of())) {
                 out.add(new NearbyPetResponse(
                         String.valueOf(pet.getId()),
                         pet.getName(),
@@ -78,9 +103,15 @@ public class PetQueryService {
 
     /** Walking-partner cards: playdate-available pets of other active users, nearest first when location is known. */
     public List<WalkingPartnerResponse> findWalkingPartners(Long requestingUserId, Double latitude, Double longitude, String species) {
+        List<Pet> pets = candidates(requestingUserId, species);
+        Set<Long> ownerIds = ownerIds(pets);
+        Map<Long, Point> positions = latitude == null || longitude == null
+                ? Map.of() : ownerPositions(ownerIds);
+        Set<Long> online = onlineOwners(ownerIds);
+
         List<WalkingPartnerResponse> out = new ArrayList<>();
-        for (Pet pet : candidates(requestingUserId, species)) {
-            Double distanceKm = ownerDistanceKm(pet.getOwnerId(), latitude, longitude);
+        for (Pet pet : pets) {
+            Double distanceKm = distanceKm(positions.get(pet.getOwnerId()), latitude, longitude);
             out.add(new WalkingPartnerResponse(
                     String.valueOf(pet.getId()),
                     pet.getName(),
@@ -93,7 +124,7 @@ public class PetQueryService {
                     pet.getRating() == null ? 0.0 : pet.getRating(),
                     UiFormat.speciesLabel(pet.getSpecies()),
                     pet.getOwner().getName(),
-                    isOwnerOnline(pet.getOwnerId())
+                    online.contains(pet.getOwnerId())
             ));
         }
         return out;
@@ -101,9 +132,13 @@ public class PetQueryService {
 
     /** Blind-date swipe deck: same candidate pool, different card shape. */
     public List<BlindDatePetResponse> findBlindDatePets(Long requestingUserId, Double latitude, Double longitude, String species) {
+        List<Pet> pets = candidates(requestingUserId, species);
+        Map<Long, Point> positions = latitude == null || longitude == null
+                ? Map.of() : ownerPositions(ownerIds(pets));
+
         List<BlindDatePetResponse> out = new ArrayList<>();
-        for (Pet pet : candidates(requestingUserId, species)) {
-            Double distanceKm = ownerDistanceKm(pet.getOwnerId(), latitude, longitude);
+        for (Pet pet : pets) {
+            Double distanceKm = distanceKm(positions.get(pet.getOwnerId()), latitude, longitude);
             out.add(new BlindDatePetResponse(
                     String.valueOf(pet.getId()),
                     pet.getName(),
@@ -130,25 +165,64 @@ public class PetQueryService {
         return pets.stream().filter(p -> wanted.equalsIgnoreCase(p.getSpecies())).toList();
     }
 
-    /** Distance from the requester to a pet owner's last known Redis position; null when either side is unknown. */
-    private Double ownerDistanceKm(Long ownerId, Double latitude, Double longitude) {
-        if (latitude == null || longitude == null || ownerId == null) {
-            return null;
+    private Set<Long> ownerIds(List<Pet> pets) {
+        Set<Long> ids = new LinkedHashSet<>();
+        for (Pet pet : pets) {
+            if (pet.getOwnerId() != null) {
+                ids.add(pet.getOwnerId());
+            }
         }
-        List<Point> positions = geoOps.position(GEO_KEY, String.valueOf(ownerId));
-        if (positions == null || positions.isEmpty() || positions.get(0) == null) {
-            return null;
-        }
-        Point p = positions.get(0);
-        return UiFormat.haversineKm(latitude, longitude, p.getY(), p.getX());
+        return ids;
     }
 
-    private boolean isOwnerOnline(Long ownerId) {
-        if (ownerId == null) {
-            return false;
+    /** Last known Redis positions for a set of owners — one GEOPOS call for all of them. */
+    private Map<Long, Point> ownerPositions(Collection<Long> ownerIds) {
+        if (ownerIds.isEmpty()) {
+            return Map.of();
         }
-        Object active = redis.opsForHash().get(META_PREFIX + ownerId, "active");
-        return active != null && Boolean.parseBoolean(String.valueOf(active));
+        List<Long> ids = List.copyOf(ownerIds);
+        String[] members = ids.stream().map(String::valueOf).toArray(String[]::new);
+        List<Point> points = geoOps.position(GEO_KEY, members);
+        if (points == null) {
+            return Map.of();
+        }
+        Map<Long, Point> out = new HashMap<>();
+        for (int i = 0; i < ids.size() && i < points.size(); i++) {
+            if (points.get(i) != null) {
+                out.put(ids.get(i), points.get(i));
+            }
+        }
+        return out;
+    }
+
+    /** Owners whose meta hash says active=true — one pipelined HGET batch instead of a call per owner. */
+    private Set<Long> onlineOwners(Collection<Long> ownerIds) {
+        if (ownerIds.isEmpty()) {
+            return Set.of();
+        }
+        List<Long> ids = List.copyOf(ownerIds);
+        List<Object> values = redis.executePipelined((RedisCallback<Object>) connection -> {
+            StringRedisConnection stringConn = (StringRedisConnection) connection;
+            for (Long id : ids) {
+                stringConn.hGet(META_PREFIX + id, "active");
+            }
+            return null;
+        });
+        Set<Long> online = new HashSet<>();
+        for (int i = 0; i < ids.size() && i < values.size(); i++) {
+            if (values.get(i) != null && Boolean.parseBoolean(String.valueOf(values.get(i)))) {
+                online.add(ids.get(i));
+            }
+        }
+        return online;
+    }
+
+    /** Distance from the requester to an owner's last known position; null when either side is unknown. */
+    private Double distanceKm(Point ownerPosition, Double latitude, Double longitude) {
+        if (ownerPosition == null || latitude == null || longitude == null) {
+            return null;
+        }
+        return UiFormat.haversineKm(latitude, longitude, ownerPosition.getY(), ownerPosition.getX());
     }
 
     private Long parseLong(String value) {
