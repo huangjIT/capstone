@@ -10,7 +10,7 @@ import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { COLORS } from '../constants/colors';
 import { BreedPicker } from '../components/BreedPicker';
 import { computeAgeLabel } from './AddPetScreen';
-import { apiPut, apiPost } from '../utils/api';
+import { apiPut, apiDelete } from '../utils/api';
 import { uploadImage } from '../utils/uploadImage';
 
 type Species = 'DOG' | 'CAT';
@@ -120,21 +120,10 @@ export const EditPetScreen: React.FC<Props> = ({ navigation, route }) => {
         onPress: async () => {
           try {
             setDeleting(true);
-            await apiPost(`/api/pets/${pet.id}/delete`, {});
+            await apiDelete(`/api/pets/${pet.id}`);
             navigation.goBack();
-          } catch {
-            // Try DELETE method via apiPut workaround — backend DELETE endpoint
-            try {
-              const { getToken } = await import('../utils/api');
-              const token = await getToken();
-              await fetch(`http://10.0.2.2:8080/api/pets/${pet.id}`, {
-                method: 'DELETE',
-                headers: token ? { Authorization: `Bearer ${token}` } : {},
-              });
-              navigation.goBack();
-            } catch (e2: any) {
-              Alert.alert('Error', e2.message || 'Failed to delete pet');
-            }
+          } catch (e: any) {
+            Alert.alert('Error', e.message || 'Failed to delete pet');
           } finally {
             setDeleting(false);
           }

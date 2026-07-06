@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const BASE_URL = 'http://10.0.2.2:8080'; // Android emulator → localhost; change for real device
+const BASE_URL = 'https://pawpal-279020382757.us-central1.run.app'; // Cloud Run backend
 
 async function authHeaders(): Promise<Record<string, string>> {
   const token = await getToken();
