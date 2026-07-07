@@ -74,7 +74,7 @@ interface LatLng {
 interface RouteMapPickerProps {
   visible: boolean;
   onClose: () => void;
-  onConfirm: (route: string) => void;
+  onConfirm: (route: string, startCoord: LatLng, endCoord: LatLng) => void;
 }
 
 const DEFAULT_REGION = {
@@ -150,8 +150,8 @@ export const RouteMapPicker: React.FC<RouteMapPickerProps> = ({ visible, onClose
   };
 
   const handleConfirm = () => {
-    if (!startLabel || !endLabel) return;
-    onConfirm(`${startLabel} → ${endLabel}`);
+    if (!startPin || !endPin || !startLabel || !endLabel) return;
+    onConfirm(`${startLabel} → ${endLabel}`, startPin, endPin);
     handleReset();
   };
 

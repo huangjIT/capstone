@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Image } from 'react-native';
 import { COLORS } from '../constants/colors';
 
 interface ChatBubbleProps {
@@ -7,6 +7,7 @@ interface ChatBubbleProps {
   timestamp: string;
   isOwn: boolean;
   avatarEmoji?: string;
+  avatarUrl?: string;
 }
 
 export const ChatBubble: React.FC<ChatBubbleProps> = ({
@@ -14,6 +15,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   timestamp,
   isOwn,
   avatarEmoji = '👤',
+  avatarUrl,
 }) => {
   if (isOwn) {
     return (
@@ -29,7 +31,11 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   return (
     <View style={styles.otherRow}>
       <View style={styles.avatar}>
-        <Text style={styles.avatarText}>{avatarEmoji}</Text>
+        {avatarUrl ? (
+          <Image source={{ uri: avatarUrl }} style={styles.avatarImg} />
+        ) : (
+          <Text style={styles.avatarText}>{avatarEmoji}</Text>
+        )}
       </View>
       <View style={styles.otherContent}>
         <View style={styles.otherBubble}>
@@ -82,6 +88,11 @@ const styles = StyleSheet.create({
   },
   avatarText: {
     fontSize: 16,
+  },
+  avatarImg: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
   },
   otherContent: {
     alignItems: 'flex-start',

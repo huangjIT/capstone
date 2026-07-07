@@ -9,44 +9,90 @@ import {
   Animated,
   NativeSyntheticEvent,
   NativeScrollEvent,
+  ActivityIndicator,
+  RefreshControl,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
+import * as Location from 'expo-location';
 import { COLORS } from '../constants/colors';
-import { blindDatePets } from '../constants/mockData';
 import { FilterRow } from '../components/FilterRow';
 import { PetCard } from '../components/PetCard';
+import { apiGet, apiPost } from '../utils/api';
 
-const MY_DATES = [
-  {
-    id: '1',
-    petName: 'Buddy',
-    emoji: '🐕',
-    status: 'Active',
-    breed: 'Golden Retriever',
-    location: 'Central Park',
-    date: 'Sat, Jun 7',
-    requests: 3,
-  },
-  {
-    id: '2',
-    petName: 'Buddy',
-    emoji: '🐕',
-    status: 'Draft',
-    breed: 'Golden Retriever',
-    location: 'Riverside Trail',
-    date: 'Sun, Jun 8',
-    requests: 0,
-  },
-];
+export interface DateInvitation {
+  id: string;
+  hostUserId: string;
+  hostPetId?: string;
+  location?: string;
+  date?: string;
+  time?: string;
+  message?: string;
+  status: string;
+  pendingRequestCount?: number;
+  petName?: string;
+  petSpecies?: string;
+  petBreed?: string;
+  petProfilePhotoUrl?: string;
+  petAge?: string;
+}
 
-export const PetBlindDateScreen: React.FC = () => {
+export interface DateFeedItem {
+  id: string;
+  hostUserId: string;
+  location?: string;
+  date?: string;
+  time?: string;
+  message?: string;
+  ownerName?: string;
+  ownerAvatarUrl?: string;
+  petId?: string;
+  petName?: string;
+  petSpecies?: string;
+  petBreed?: string;
+  petGender?: string;
+  petAge?: string;
+  petProfilePhotoUrl?: string;
+  petIsVaccinated?: boolean;
+  petIsNeutered?: boolean;
+  distanceKm?: number;
+  distanceLabel?: string;
+  myRequestId?: string;
+  myRequestStatus?: string;
+  unreadMessageCount?: number;
+}
+
+interface PetBlindDateScreenProps {
+  navigation: any;
+}
+
+const speciesEmoji = (species?: string) => {
+  if (species === 'DOG') return '🐕';
+  if (species === 'CAT') return '🐱';
+  return '🐾';
+};
+
+const petTags = (item: DateFeedItem): string[] => {
+  const tags: string[] = [];
+  if (item.petIsVaccinated) tags.push('Vaccinated');
+  if (item.petIsNeutered) tags.push('Neutered');
+  return tags;
+};
+
+export const PetBlindDateScreen: React.FC<PetBlindDateScreenProps> = ({ navigation }) => {
   const insets = useSafeAreaInsets();
   const [speciesFilter, setSpeciesFilter] = useState('All');
   const [ageFilter, setAgeFilter] = useState('Any');
   const [vaccineFilter, setVaccineFilter] = useState('All');
   const [breedFilter, setBreedFilter] = useState('All');
+  const [myInvitations, setMyInvitations] = useState<DateInvitation[]>([]);
+  const [feed, setFeed] = useState<DateFeedItem[]>([]);
+  const [heartedIds, setHeartedIds] = useState<Set<string>>(new Set());
+  const [unreadMsg, setUnreadMsg] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  // Scroll-based hide/show for My Dates (same pattern as Walk page)
   const datesAnim = useRef(new Animated.Value(1)).current;
   const isDatesVisible = useRef(true);
   const animating = useRef(false);
@@ -73,31 +119,96 @@ export const PetBlindDateScreen: React.FC = () => {
     else if (y < 20) showDates();
   }, [hideDates, showDates]);
 
-  const datesMaxHeight = datesAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, 200],
-  });
+  const datesMaxHeight = datesAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 200] });
 
-  const filtered = blindDatePets.filter((p) => {
-    if (speciesFilter !== 'All' && p.species !== speciesFilter) return false;
-    if (vaccineFilter === 'Yes' && !p.vaccinated) return false;
-    return true;
-  });
+  const buildFeedPath = useCallback(async () => {
+    const params = new URLSearchParams();
+    if (speciesFilter !== 'All') params.append('species', speciesFilter);
+    if (ageFilter !== 'Any') params.append('age', ageFilter);
+    if (vaccineFilter !== 'All') params.append('vaccine', vaccineFilter);
+    if (breedFilter !== 'All') params.append('breed', breedFilter);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === 'granted') {
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        params.append('lat', String(loc.coords.latitude));
+        params.append('lng', String(loc.coords.longitude));
+      }
+    } catch (_) {}
+    const qs = params.toString();
+    return `/api/date/invitations/feed${qs ? '?' + qs : ''}`;
+  }, [speciesFilter, ageFilter, vaccineFilter, breedFilter]);
+
+  const loadData = useCallback(async () => {
+    try {
+      const feedPath = await buildFeedPath();
+      const [invs, feedItems, sentReqs] = await Promise.all([
+        apiGet<DateInvitation[]>('/api/date/invitations/my'),
+        apiGet<DateFeedItem[]>(feedPath),
+        apiGet<Array<{ invitationId: string; status: string }>>('/api/date/requests/my-sent'),
+      ]);
+      setMyInvitations(invs);
+      setFeed(feedItems);
+      setHeartedIds(new Set(sentReqs.map(r => r.invitationId)));
+    } catch (_) {
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [buildFeedPath]);
+
+  const refreshUnread = useCallback(async () => {
+    try {
+      const counts = await apiGet<Record<string, number>>('/api/messages/unread-counts');
+      setUnreadMsg(counts.DATE ?? 0);
+    } catch (_) {}
+  }, []);
+
+  useFocusEffect(useCallback(() => {
+    loadData();
+    refreshUnread();
+    const interval = setInterval(refreshUnread, 5000);
+    return () => clearInterval(interval);
+  }, [loadData, refreshUnread]));
+
+  const onRefresh = useCallback(() => { setRefreshing(true); loadData(); }, [loadData]);
+
+  const handleHeart = useCallback(async (item: DateFeedItem) => {
+    if (heartedIds.has(item.id)) return;
+    try {
+      await apiPost('/api/date/requests', { invitationId: item.id });
+      setHeartedIds(prev => new Set([...prev, item.id]));
+    } catch (err: any) {
+      Alert.alert('Error', err?.message ?? 'Failed to send request');
+    }
+  }, [heartedIds]);
 
   return (
     <View style={styles.container}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <Text style={styles.headerTitle}>💕 Pet Blind Date</Text>
-        <Text style={styles.headerSub}>Find the perfect match for your pet</Text>
+        <View style={styles.headerRow}>
+          <View>
+            <Text style={styles.headerTitle}>💕 Pet Blind Date</Text>
+            <Text style={styles.headerSub}>Find the perfect match for your pet</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.msgBtn}
+            onPress={() => navigation.navigate('Notifications' as any, { filter: 'date' } as any)}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.msgBtnText}>💬</Text>
+            {unreadMsg > 0 && <View style={styles.msgBtnDot} />}
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* My Dates — animated show/hide */}
       <Animated.View style={[styles.myDatesSection, { maxHeight: datesMaxHeight, opacity: datesAnim, overflow: 'hidden' }]}>
         <View style={styles.myDatesHeader}>
           <Text style={styles.myDatesTitle}>My Dates</Text>
-          <TouchableOpacity>
-            <Text style={styles.manageText}>Manage →</Text>
+          <TouchableOpacity onPress={() => navigation.navigate('PostDateInvitation')}>
+            <Text style={styles.manageText}>+ Post Date →</Text>
           </TouchableOpacity>
         </View>
         <ScrollView
@@ -105,31 +216,39 @@ export const PetBlindDateScreen: React.FC = () => {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.myDatesScroll}
         >
-          {MY_DATES.map((d, index) => (
-            <View key={d.id} style={styles.dateCard}>
+          {myInvitations.map(d => (
+            <TouchableOpacity
+              key={d.id}
+              style={styles.dateCard}
+              onPress={() => navigation.navigate('EditDateInvitation', { invitation: d })}
+              activeOpacity={0.8}
+            >
               <View style={styles.dateCardTop}>
                 <View style={styles.dateAvatar}>
-                  <Text style={styles.dateAvatarEmoji}>{d.emoji}</Text>
+                  <Text style={styles.dateAvatarEmoji}>{speciesEmoji(d.petSpecies)}</Text>
                 </View>
-                <View style={[styles.statusBadge, index === 0 ? styles.statusActive : styles.statusDraft]}>
-                  <Text style={[styles.statusText, index === 0 ? styles.statusTextActive : styles.statusTextDraft]}>
-                    {d.status}
+                <View style={[styles.statusBadge, d.status === 'ACTIVE' ? styles.statusActive : styles.statusDraft]}>
+                  <Text style={[styles.statusText, d.status === 'ACTIVE' ? styles.statusTextActive : styles.statusTextDraft]}>
+                    {d.status === 'ACTIVE' ? 'Active' : d.status}
                   </Text>
                 </View>
               </View>
-              <Text style={styles.datePetName}>{d.petName}</Text>
-              <Text style={styles.dateMeta} numberOfLines={1}>📍 {d.location}</Text>
-              <Text style={styles.dateMeta}>🗓 {d.date}</Text>
-              {d.requests > 0 && (
-                <View style={styles.requestsBadge}>
-                  <Text style={styles.requestsText}>💕 {d.requests} requests</Text>
-                </View>
+              <Text style={styles.datePetName}>{d.petName ?? '—'}</Text>
+              {d.location && <Text style={styles.dateMeta} numberOfLines={1}>📍 {d.location}</Text>}
+              {d.date && <Text style={styles.dateMeta}>🗓 {d.date}</Text>}
+              {(d.pendingRequestCount ?? 0) > 0 && (
+                <TouchableOpacity
+                  style={styles.requestsBadge}
+                  onPress={() => navigation.navigate('Notifications' as any, { filter: 'date' } as any)}
+                  activeOpacity={0.75}
+                >
+                  <Text style={styles.requestsText}>💕 {d.pendingRequestCount} requests</Text>
+                </TouchableOpacity>
               )}
-            </View>
+            </TouchableOpacity>
           ))}
 
-          {/* Add new card */}
-          <TouchableOpacity style={styles.addDateCard}>
+          <TouchableOpacity style={styles.addDateCard} onPress={() => navigation.navigate('PostDateInvitation')}>
             <Text style={styles.addDateIcon}>+</Text>
             <Text style={styles.addDateText}>Post a Date</Text>
           </TouchableOpacity>
@@ -146,30 +265,53 @@ export const PetBlindDateScreen: React.FC = () => {
 
       {/* List */}
       <FlatList
-        data={filtered}
+        data={feed}
         keyExtractor={(item) => item.id}
         showsVerticalScrollIndicator={false}
         onScroll={handleScroll}
         scrollEventThrottle={16}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.purple} />}
         ListHeaderComponent={
           <View style={styles.countRow}>
-            <Text style={styles.countText}>💕 {filtered.length} Nearby Matches</Text>
+            <Text style={styles.countText}>💕 {feed.length} Nearby Matches</Text>
             <TouchableOpacity style={styles.sortBtn}>
               <Text style={styles.sortBtnText}>Sort: Distance ↓</Text>
             </TouchableOpacity>
           </View>
         }
+        ListEmptyComponent={
+          loading ? (
+            <ActivityIndicator size="large" color={COLORS.purple} style={{ marginTop: 40 }} />
+          ) : (
+            <View style={styles.emptyFeed}>
+              <Text style={styles.emptyFeedText}>No pet dates nearby yet.</Text>
+            </View>
+          )
+        }
         renderItem={({ item }) => (
           <PetCard
-            name={item.name}
-            emoji={item.emoji}
-            breed={item.breed}
-            age={item.age}
-            gender={item.gender}
-            distance={item.distance}
-            tags={item.tags}
+            name={item.petName ?? item.ownerName ?? '—'}
+            emoji={speciesEmoji(item.petSpecies)}
+            photoUrl={item.petProfilePhotoUrl}
+            breed={item.petBreed ?? '—'}
+            age={item.petAge ?? ''}
+            gender={item.petGender}
+            distance={item.distanceLabel ?? ''}
+            owner={item.ownerName}
+            tags={petTags(item)}
+            online
             variant="heart"
-            onHeart={() => {}}
+            connectStatus={
+              item.myRequestStatus === 'REJECTED' || item.myRequestStatus === 'BLOCKED' ? 'rejected'
+              : item.myRequestStatus === 'ACCEPTED' ? 'accepted'
+              : item.myRequestStatus === 'PENDING' || heartedIds.has(item.id) ? 'requested'
+              : 'default'
+            }
+            onHeart={() => handleHeart(item)}
+            onPress={() => navigation.navigate('DatePetProfile', {
+              feedItem: item,
+              alreadyRequested: heartedIds.has(item.id) || !!item.myRequestStatus,
+            })}
           />
         )}
         contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 20 }]}
@@ -179,10 +321,7 @@ export const PetBlindDateScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.bg,
-  },
+  container: { flex: 1, backgroundColor: COLORS.bg },
   listContent: {},
   header: {
     paddingHorizontal: 20,
@@ -191,32 +330,36 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
   },
-  headerTitle: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: COLORS.text,
-    marginBottom: 2,
+  headerTitle: { fontSize: 22, fontWeight: '800', color: COLORS.text, marginBottom: 2 },
+  headerSub: { fontSize: 13, color: COLORS.textSub },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
-  headerSub: {
-    fontSize: 13,
-    color: COLORS.textSub,
+  msgBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: COLORS.bg,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  postNewBtn: {
-    backgroundColor: COLORS.purple,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: 100,
+  msgBtnText: { fontSize: 18 },
+  msgBtnDot: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    width: 11,
+    height: 11,
+    borderRadius: 5.5,
+    backgroundColor: '#EF4444',
+    borderWidth: 1.5,
+    borderColor: COLORS.card,
   },
-  postNewText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-
-  // My Dates section
-  myDatesSection: {
-    backgroundColor: COLORS.card,
-  },
+  myDatesSection: { backgroundColor: COLORS.card },
   myDatesHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -225,21 +368,9 @@ const styles = StyleSheet.create({
     paddingTop: 14,
     marginBottom: 10,
   },
-  myDatesTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: COLORS.text,
-  },
-  manageText: {
-    fontSize: 13,
-    color: COLORS.purple,
-    fontWeight: '600',
-  },
-  myDatesScroll: {
-    paddingHorizontal: 16,
-    paddingBottom: 14,
-    gap: 10,
-  },
+  myDatesTitle: { fontSize: 15, fontWeight: '700', color: COLORS.text },
+  manageText: { fontSize: 13, color: COLORS.purple, fontWeight: '600' },
+  myDatesScroll: { paddingHorizontal: 16, paddingBottom: 14, gap: 10 },
   dateCard: {
     backgroundColor: COLORS.purpleLight,
     borderRadius: 14,
@@ -263,28 +394,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  dateAvatarEmoji: {
-    fontSize: 20,
-  },
-  statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 100,
-  },
+  dateAvatarEmoji: { fontSize: 20 },
+  statusBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 100 },
   statusActive: { backgroundColor: '#DCFCE7' },
   statusDraft: { backgroundColor: '#F3F4F6' },
   statusText: { fontSize: 10, fontWeight: '600' },
   statusTextActive: { color: '#16A34A' },
   statusTextDraft: { color: COLORS.textMuted },
-  datePetName: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: COLORS.text,
-  },
-  dateMeta: {
-    fontSize: 11,
-    color: COLORS.textSub,
-  },
+  datePetName: { fontSize: 13, fontWeight: '700', color: COLORS.text },
+  dateMeta: { fontSize: 11, color: COLORS.textSub },
   requestsBadge: {
     marginTop: 4,
     backgroundColor: '#EDE9FE',
@@ -293,11 +411,7 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     alignSelf: 'flex-start',
   },
-  requestsText: {
-    fontSize: 10,
-    color: COLORS.purple,
-    fontWeight: '600',
-  },
+  requestsText: { fontSize: 10, color: COLORS.purple, fontWeight: '600' },
   addDateCard: {
     width: 100,
     borderRadius: 14,
@@ -309,19 +423,8 @@ const styles = StyleSheet.create({
     gap: 4,
     backgroundColor: 'transparent',
   },
-  addDateIcon: {
-    fontSize: 24,
-    color: COLORS.purple,
-    fontWeight: '300',
-  },
-  addDateText: {
-    fontSize: 12,
-    color: COLORS.purple,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-
-  // Filters
+  addDateIcon: { fontSize: 24, color: COLORS.purple, fontWeight: '300' },
+  addDateText: { fontSize: 12, color: COLORS.purple, fontWeight: '600', textAlign: 'center' },
   filtersSection: {
     paddingHorizontal: 20,
     paddingTop: 14,
@@ -338,11 +441,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 14,
   },
-  countText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: COLORS.purple,
-  },
+  countText: { fontSize: 15, fontWeight: '700', color: COLORS.purple },
   sortBtn: {
     paddingHorizontal: 12,
     paddingVertical: 7,
@@ -351,9 +450,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#DDD6FE',
   },
-  sortBtnText: {
-    fontSize: 12,
-    color: COLORS.purple,
-    fontWeight: '600',
-  },
+  sortBtnText: { fontSize: 12, color: COLORS.purple, fontWeight: '600' },
+  emptyFeed: { alignItems: 'center', paddingVertical: 40 },
+  emptyFeedText: { fontSize: 14, color: COLORS.textMuted },
 });

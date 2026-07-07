@@ -13,8 +13,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
+import * as Location from 'expo-location';
 import { COLORS } from '../constants/colors';
-import { RouteMapPicker } from '../components/RouteMapPicker';
 import { apiPost, apiGet } from '../utils/api';
 
 interface Pet {
@@ -33,49 +33,75 @@ function formatTime(d: Date): string {
   return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
 }
 
-interface PostInvitationScreenProps {
+interface PostDateInvitationScreenProps {
   navigation: any;
 }
 
-export const PostInvitationScreen: React.FC<PostInvitationScreenProps> = ({ navigation }) => {
+export const PostDateInvitationScreen: React.FC<PostDateInvitationScreenProps> = ({ navigation }) => {
   const insets = useSafeAreaInsets();
   const [pets, setPets] = useState<Pet[]>([]);
-  const [selectedPetIds, setSelectedPetIds] = useState<string[]>([]);
-  const [route, setRoute] = useState('');
-  const [routeCoords, setRouteCoords] = useState<{ latitude: number; longitude: number } | null>(null);
-  const [mapVisible, setMapVisible] = useState(false);
+  const [selectedPetId, setSelectedPetId] = useState<string | null>(null);
+  const [location, setLocation] = useState('');
+  const [locationCoords, setLocationCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [locating, setLocating] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedTime, setSelectedTime] = useState<Date | null>(null);
   const [datePickerVisible, setDatePickerVisible] = useState(false);
   const [timePickerVisible, setTimePickerVisible] = useState(false);
   const [message, setMessage] = useState('');
-  const [duration, setDuration] = useState('60');
-  const [maxSpots, setMaxSpots] = useState('4');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    apiGet<Pet[]>('/api/pets/my').then(setPets).catch(() => {});
+    apiGet<Pet[]>('/api/pets/my').then(list => {
+      setPets(list);
+      if (list.length === 1) setSelectedPetId(list[0].id);
+    }).catch(() => {});
   }, []);
 
+  const useCurrentLocation = async () => {
+    try {
+      setLocating(true);
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Location permission is required to use your current location.');
+        return;
+      }
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      setLocationCoords({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
+      const places = await Location.reverseGeocodeAsync({
+        latitude: loc.coords.latitude,
+        longitude: loc.coords.longitude,
+      });
+      const p = places[0];
+      const label = p
+        ? [p.name, p.street, p.city].filter(Boolean).join(', ')
+        : `${loc.coords.latitude.toFixed(5)}, ${loc.coords.longitude.toFixed(5)}`;
+      setLocation(label);
+    } catch (_) {
+      Alert.alert('Error', 'Could not get your current location.');
+    } finally {
+      setLocating(false);
+    }
+  };
+
   const handlePost = async () => {
-    if (!route.trim()) { Alert.alert('Validation', 'Please set a route or meeting point.'); return; }
+    if (!selectedPetId) { Alert.alert('Validation', 'Please select the pet going on the date.'); return; }
+    if (!location.trim()) { Alert.alert('Validation', 'Please set a meeting location.'); return; }
     if (!selectedDate) { Alert.alert('Validation', 'Please select a date.'); return; }
     if (!selectedTime) { Alert.alert('Validation', 'Please select a time.'); return; }
     try {
       setSaving(true);
-      await apiPost('/api/walk/invitations', {
-        route: route.trim(),
+      await apiPost('/api/date/invitations', {
+        hostPetId: selectedPetId,
+        location: location.trim(),
         date: formatDate(selectedDate),
         time: formatTime(selectedTime),
         message: message.trim() || undefined,
-        durationMinutes: parseInt(duration, 10) || 60,
-        maxSpots: parseInt(maxSpots, 10) || 4,
-        ...(selectedPetIds.length > 0 ? { hostPetIds: selectedPetIds } : {}),
-        ...(routeCoords ? { latitude: routeCoords.latitude, longitude: routeCoords.longitude } : {}),
+        ...(locationCoords ? { latitude: locationCoords.latitude, longitude: locationCoords.longitude } : {}),
       });
       navigation.goBack();
     } catch (e: any) {
-      Alert.alert('Error', e.message || 'Failed to post invitation');
+      Alert.alert('Error', e.message || 'Failed to post date invitation');
     } finally {
       setSaving(false);
     }
@@ -83,11 +109,6 @@ export const PostInvitationScreen: React.FC<PostInvitationScreenProps> = ({ navi
 
   return (
     <View style={styles.container}>
-      <RouteMapPicker
-        visible={mapVisible}
-        onClose={() => setMapVisible(false)}
-        onConfirm={(r, startCoord) => { setRoute(r); setRouteCoords(startCoord); setMapVisible(false); }}
-      />
       <DateTimePickerModal
         isVisible={datePickerVisible}
         mode="date"
@@ -95,7 +116,7 @@ export const PostInvitationScreen: React.FC<PostInvitationScreenProps> = ({ navi
         onConfirm={(d) => { setSelectedDate(d); setDatePickerVisible(false); }}
         onCancel={() => setDatePickerVisible(false)}
         display={Platform.OS === 'ios' ? 'inline' : 'default'}
-        accentColor={COLORS.primary}
+        accentColor={COLORS.purple}
       />
       <DateTimePickerModal
         isVisible={timePickerVisible}
@@ -103,7 +124,7 @@ export const PostInvitationScreen: React.FC<PostInvitationScreenProps> = ({ navi
         onConfirm={(d) => { setSelectedTime(d); setTimePickerVisible(false); }}
         onCancel={() => setTimePickerVisible(false)}
         display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-        accentColor={COLORS.primary}
+        accentColor={COLORS.purple}
       />
       <ScrollView
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 100 }]}
@@ -115,29 +136,27 @@ export const PostInvitationScreen: React.FC<PostInvitationScreenProps> = ({ navi
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
             <Text style={styles.backText}>← Back</Text>
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Post Invitation</Text>
+          <Text style={styles.headerTitle}>Post a Date</Text>
           <View style={styles.backBtn} />
         </View>
 
         <View style={styles.formBody}>
-          {/* Pet selector */}
+          {/* Pet selector — single choice */}
           {pets.length > 0 && (
             <View style={styles.fieldGroup}>
-              <Text style={styles.fieldLabel}>🐾 Walking With</Text>
+              <Text style={styles.fieldLabel}>💕 Pet Going on the Date</Text>
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.petScrollContent}
               >
                 {pets.map(pet => {
-                  const selected = selectedPetIds.includes(pet.id);
+                  const selected = selectedPetId === pet.id;
                   return (
                     <TouchableOpacity
                       key={pet.id}
                       style={[styles.petChip, selected && styles.petChipActive]}
-                      onPress={() => setSelectedPetIds(prev =>
-                        selected ? prev.filter(id => id !== pet.id) : [...prev, pet.id]
-                      )}
+                      onPress={() => setSelectedPetId(selected ? null : pet.id)}
                       activeOpacity={0.8}
                     >
                       {pet.profilePhotoUrl ? (
@@ -165,19 +184,28 @@ export const PostInvitationScreen: React.FC<PostInvitationScreenProps> = ({ navi
             </View>
           )}
 
-          {/* Route */}
+          {/* Location */}
           <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>📍 Route / Meeting Point</Text>
-            <TouchableOpacity
-              style={[styles.input, styles.routeField]}
-              onPress={() => setMapVisible(true)}
-              activeOpacity={0.7}
-            >
-              <Text style={route ? styles.routeText : styles.routePlaceholder} numberOfLines={1}>
-                {route || 'e.g. Riverside Park entrance'}
-              </Text>
-              <Text style={styles.mapIcon}>🗺</Text>
-            </TouchableOpacity>
+            <Text style={styles.fieldLabel}>📍 Meeting Location</Text>
+            <View style={styles.locationRow}>
+              <TextInput
+                style={[styles.input, styles.locationInput]}
+                value={location}
+                onChangeText={(text) => { setLocation(text); setLocationCoords(null); }}
+                placeholder="e.g. Central Park dog run"
+                placeholderTextColor={COLORS.textMuted}
+              />
+              <TouchableOpacity
+                style={styles.locateBtn}
+                onPress={useCurrentLocation}
+                disabled={locating}
+                activeOpacity={0.7}
+              >
+                {locating
+                  ? <ActivityIndicator size="small" color={COLORS.purple} />
+                  : <Text style={styles.locateIcon}>📍</Text>}
+              </TouchableOpacity>
+            </View>
           </View>
 
           {/* Date */}
@@ -202,33 +230,6 @@ export const PostInvitationScreen: React.FC<PostInvitationScreenProps> = ({ navi
             </TouchableOpacity>
           </View>
 
-          {/* Duration & Max Spots */}
-          <View style={styles.rowFields}>
-            <View style={[styles.fieldGroup, { flex: 1 }]}>
-              <Text style={styles.fieldLabel}>⏱ Duration (min)</Text>
-              <TextInput
-                style={styles.input}
-                value={duration}
-                onChangeText={setDuration}
-                keyboardType="number-pad"
-                placeholder="60"
-                placeholderTextColor={COLORS.textMuted}
-              />
-            </View>
-            <View style={styles.rowSpacer} />
-            <View style={[styles.fieldGroup, { flex: 1 }]}>
-              <Text style={styles.fieldLabel}>👥 Max Spots</Text>
-              <TextInput
-                style={styles.input}
-                value={maxSpots}
-                onChangeText={setMaxSpots}
-                keyboardType="number-pad"
-                placeholder="4"
-                placeholderTextColor={COLORS.textMuted}
-              />
-            </View>
-          </View>
-
           {/* Message */}
           <View style={styles.fieldGroup}>
             <Text style={styles.fieldLabel}>💬 Message (optional)</Text>
@@ -236,7 +237,7 @@ export const PostInvitationScreen: React.FC<PostInvitationScreenProps> = ({ navi
               style={[styles.input, styles.textArea]}
               value={message}
               onChangeText={setMessage}
-              placeholder="Share a note with potential walk partners..."
+              placeholder="Tell others about your pet and what you're looking for..."
               placeholderTextColor={COLORS.textMuted}
               multiline
               numberOfLines={4}
@@ -245,10 +246,10 @@ export const PostInvitationScreen: React.FC<PostInvitationScreenProps> = ({ navi
           </View>
 
           <View style={styles.tipCard}>
-            <Text style={styles.tipTitle}>💡 Tips for a great walk</Text>
-            <Text style={styles.tipText}>• Be specific with your location to help others find you easily</Text>
-            <Text style={styles.tipText}>• Choose a dog-friendly park or trail</Text>
-            <Text style={styles.tipText}>• Update the invitation if your plans change</Text>
+            <Text style={styles.tipTitle}>💡 Tips for a great date</Text>
+            <Text style={styles.tipText}>• Pick a neutral, pet-friendly spot for the first meeting</Text>
+            <Text style={styles.tipText}>• Mention your pet's temperament in the message</Text>
+            <Text style={styles.tipText}>• Keep vaccination info up to date on your pet profile</Text>
           </View>
         </View>
       </ScrollView>
@@ -258,7 +259,7 @@ export const PostInvitationScreen: React.FC<PostInvitationScreenProps> = ({ navi
         <TouchableOpacity style={[styles.ctaButton, saving && { opacity: 0.6 }]} onPress={handlePost} disabled={saving}>
           {saving
             ? <ActivityIndicator color="#FFFFFF" />
-            : <Text style={styles.ctaText}>🐾 Post Invitation</Text>}
+            : <Text style={styles.ctaText}>💕 Post Date Invitation</Text>}
         </TouchableOpacity>
       </View>
     </View>
@@ -279,7 +280,7 @@ const styles = StyleSheet.create({
     borderBottomColor: COLORS.border,
   },
   backBtn: { width: 60 },
-  backText: { fontSize: 15, color: COLORS.primary, fontWeight: '600' },
+  backText: { fontSize: 15, color: COLORS.purple, fontWeight: '600' },
   headerTitle: { fontSize: 17, fontWeight: '700', color: COLORS.text },
   formBody: { padding: 20, gap: 4 },
   fieldGroup: { marginBottom: 16 },
@@ -294,10 +295,19 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: COLORS.text,
   },
-  routeField: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  routeText: { fontSize: 15, color: COLORS.text, flex: 1 },
-  routePlaceholder: { fontSize: 15, color: COLORS.textMuted, flex: 1 },
-  mapIcon: { fontSize: 18, marginLeft: 8 },
+  locationRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  locationInput: { flex: 1 },
+  locateBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: COLORS.purpleLight,
+    borderWidth: 1,
+    borderColor: '#DDD6FE',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  locateIcon: { fontSize: 20 },
   selectInput: {
     backgroundColor: COLORS.card,
     borderRadius: 14,
@@ -313,8 +323,6 @@ const styles = StyleSheet.create({
   selectPlaceholder: { fontSize: 15, color: COLORS.textMuted, flex: 1 },
   selectArrow: { fontSize: 16, marginLeft: 8 },
   textArea: { height: 110, paddingTop: 12 },
-  rowFields: { flexDirection: 'row' },
-  rowSpacer: { width: 12 },
   petScrollContent: { gap: 10, paddingVertical: 4 },
   petChip: {
     flexDirection: 'row',
@@ -329,8 +337,8 @@ const styles = StyleSheet.create({
     minWidth: 130,
   },
   petChipActive: {
-    borderColor: COLORS.primary,
-    backgroundColor: COLORS.primaryLight,
+    borderColor: COLORS.purple,
+    backgroundColor: COLORS.purpleLight,
   },
   petChipPhoto: { width: 40, height: 40, borderRadius: 20 },
   petChipEmoji: {
@@ -339,23 +347,23 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
     borderWidth: 1, borderColor: COLORS.border,
   },
-  petChipEmojiActive: { backgroundColor: '#FFFFFF', borderColor: COLORS.primaryBorder },
+  petChipEmojiActive: { backgroundColor: '#FFFFFF', borderColor: '#DDD6FE' },
   petChipEmojiText: { fontSize: 20 },
   petChipInfo: { flex: 1 },
   petChipName: { fontSize: 14, fontWeight: '700', color: COLORS.text },
-  petChipNameActive: { color: COLORS.primary },
+  petChipNameActive: { color: COLORS.purple },
   petChipBreed: { fontSize: 11, color: COLORS.textMuted, marginTop: 1 },
-  petChipCheck: { fontSize: 14, color: COLORS.primary, fontWeight: '700' },
+  petChipCheck: { fontSize: 14, color: COLORS.purple, fontWeight: '700' },
   tipCard: {
-    backgroundColor: COLORS.primaryLight,
+    backgroundColor: COLORS.purpleLight,
     borderRadius: 16,
     padding: 16,
     borderWidth: 1,
-    borderColor: COLORS.primaryBorder,
+    borderColor: '#DDD6FE',
     gap: 6,
     marginTop: 8,
   },
-  tipTitle: { fontSize: 14, fontWeight: '700', color: COLORS.primary, marginBottom: 4 },
+  tipTitle: { fontSize: 14, fontWeight: '700', color: COLORS.purple, marginBottom: 4 },
   tipText: { fontSize: 13, color: COLORS.text, lineHeight: 20 },
   ctaContainer: {
     position: 'absolute',
@@ -367,11 +375,11 @@ const styles = StyleSheet.create({
     paddingTop: 16,
   },
   ctaButton: {
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.purple,
     borderRadius: 16,
     paddingVertical: 16,
     alignItems: 'center',
-    shadowColor: COLORS.primary,
+    shadowColor: COLORS.purple,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.35,
     shadowRadius: 10,
