@@ -4,6 +4,7 @@ import org.example.pet_social.entity.Message;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -29,10 +30,30 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
     // Count unread messages
     Long countByReceiver_IdAndIsRead(Long receiverId, Boolean isRead);
 
-    // Find recent conversations for a user (unique conversation partners)
-    @Query(value = "SELECT DISTINCT ON (CASE WHEN sender_id = :userId THEN receiver_id ELSE sender_id END) * " +
-                   "FROM messages WHERE sender_id = :userId OR receiver_id = :userId " +
-                   "ORDER BY CASE WHEN sender_id = :userId THEN receiver_id ELSE sender_id END, created_at DESC",
+    // Messages of one thread (two users + optional match/listing context), oldest first
+    @Query("SELECT m FROM Message m WHERE " +
+           "((m.sender.id = :userId1 AND m.receiver.id = :userId2) OR (m.sender.id = :userId2 AND m.receiver.id = :userId1)) " +
+           "AND ((:contextType IS NULL AND m.contextType IS NULL) OR m.contextType = :contextType) " +
+           "AND ((:contextId IS NULL AND m.contextId IS NULL) OR m.contextId = :contextId) " +
+           "ORDER BY m.createdAt ASC")
+    List<Message> findThread(@Param("userId1") Long userId1, @Param("userId2") Long userId2,
+                             @Param("contextType") String contextType, @Param("contextId") Long contextId);
+
+    // Mark everything the other user sent me in this thread as read
+    @Modifying
+    @Query("UPDATE Message m SET m.isRead = true, m.readAt = CURRENT_TIMESTAMP " +
+           "WHERE m.receiver.id = :userId AND m.sender.id = :otherUserId AND m.isRead = false")
+    int markThreadRead(@Param("userId") Long userId, @Param("otherUserId") Long otherUserId);
+
+    // Find recent conversations for a user (latest message per unique partner, newest first).
+    // Postgres requires the DISTINCT ON expression to match the first ORDER BY expression
+    // exactly, which bind parameters break — so partner_id is computed once in a subquery.
+    @Query(value = "SELECT * FROM (" +
+                   "  SELECT DISTINCT ON (t.partner_id) t.* FROM (" +
+                   "    SELECT m.*, CASE WHEN m.sender_id = :userId THEN m.receiver_id ELSE m.sender_id END AS partner_id " +
+                   "    FROM messages m WHERE m.sender_id = :userId OR m.receiver_id = :userId" +
+                   "  ) t ORDER BY t.partner_id, t.created_at DESC" +
+                   ") latest ORDER BY latest.created_at DESC",
            nativeQuery = true)
     List<Message> findRecentConversations(@Param("userId") Long userId);
 }

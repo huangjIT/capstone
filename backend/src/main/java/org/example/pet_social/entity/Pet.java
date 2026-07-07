@@ -60,6 +60,22 @@ public class Pet {
     @Column(name = "is_available_for_playdate")
     private Boolean isAvailableForPlaydate;
 
+    // Emoji shown as the pet's avatar in the mobile app (map pins, cards, chat)
+    @Column(name = "avatar_emoji", length = 8)
+    private String avatarEmoji;
+
+    // Comma-separated UI tags, e.g. "Friendly,Calm pace"; 'Vaccinated' is derived from isVaccinated
+    @Column(name = "personality_tags")
+    private String personalityTags;
+
+    // Aggregate owner-review rating 0.0-5.0 shown on partner cards
+    @Column
+    private Double rating;
+
+    // Preferred daily walk time shown on partner cards, e.g. "7:00 AM"
+    @Column(name = "preferred_walk_time")
+    private String preferredWalkTime;
+
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
@@ -135,6 +151,18 @@ public class Pet {
     public void setIsAvailableForPlaydate(Boolean isAvailableForPlaydate) {
         this.isAvailableForPlaydate = isAvailableForPlaydate;
     }
+
+    public String getAvatarEmoji() { return avatarEmoji; }
+    public void setAvatarEmoji(String avatarEmoji) { this.avatarEmoji = avatarEmoji; }
+
+    public String getPersonalityTags() { return personalityTags; }
+    public void setPersonalityTags(String personalityTags) { this.personalityTags = personalityTags; }
+
+    public Double getRating() { return rating; }
+    public void setRating(Double rating) { this.rating = rating; }
+
+    public String getPreferredWalkTime() { return preferredWalkTime; }
+    public void setPreferredWalkTime(String preferredWalkTime) { this.preferredWalkTime = preferredWalkTime; }
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
