@@ -10,7 +10,7 @@ import java.util.Set;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/dashboard/api")
+@RequestMapping("/api/inspector")
 public class InspectorController {
 
     private final StringRedisTemplate redisTemplate;
