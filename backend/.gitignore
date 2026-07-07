@@ -18,7 +18,6 @@ target/
 *.iws
 *.iml
 *.ipr
-.mvn
 
 ### NetBeans ###
 /nbproject/private/
@@ -32,7 +31,10 @@ build/
 
 ### VS Code ###
 .vscode/
+.claude/
+
 
 
 ### Docker Capstone Infrastructure ###
 postgres_data/
+

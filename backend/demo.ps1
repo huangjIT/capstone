@@ -29,8 +29,9 @@ while ($i -lt 10) {
     $userJson = @{
         name = "TestUser_$i"
         email = "testuser$i@example.com"
+        password = "demopass123"
         role = "PET_OWNER"
-        isActive = $true
+        active = $true
         matchPreferencesMask = $prefMask
     } | ConvertTo-Json
 
