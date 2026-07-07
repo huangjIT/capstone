@@ -1,12 +1,51 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const BASE_URL = 'http://10.0.2.2:8080'; // Android emulator → localhost; change for real device
+const BASE_URL = 'https://pawpal-279020382757.us-central1.run.app'; // Cloud Run backend
+
+async function authHeaders(): Promise<Record<string, string>> {
+  const token = await getToken();
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
 
 export async function apiPost<T>(path: string, body: object): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: await authHeaders(),
     body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(text || 'Request failed');
+  return JSON.parse(text) as T;
+}
+
+export async function apiGet<T>(path: string): Promise<T> {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method: 'GET',
+    headers: await authHeaders(),
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(text || 'Request failed');
+  return JSON.parse(text) as T;
+}
+
+export async function apiPut<T>(path: string, body: object): Promise<T> {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method: 'PUT',
+    headers: await authHeaders(),
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(text || 'Request failed');
+  return JSON.parse(text) as T;
+}
+
+export async function apiDelete<T>(path: string): Promise<T> {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method: 'DELETE',
+    headers: await authHeaders(),
   });
   const text = await res.text();
   if (!res.ok) throw new Error(text || 'Request failed');

@@ -13,21 +13,22 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/colors';
 import { apiPost } from '../utils/api';
-import { WalkFeedItem } from './FindPartnersScreen';
+import { DateFeedItem } from './PetBlindDateScreen';
 
-interface ConnectPetProfileScreenProps {
+interface DatePetProfileScreenProps {
   navigation: any;
   route: any;
 }
 
-export const ConnectPetProfileScreen: React.FC<ConnectPetProfileScreenProps> = ({
+export const DatePetProfileScreen: React.FC<DatePetProfileScreenProps> = ({
   navigation,
   route,
 }) => {
   const insets = useSafeAreaInsets();
-  const feedItem: WalkFeedItem = route?.params?.feedItem;
+  const feedItem: DateFeedItem = route?.params?.feedItem;
+  const alreadyRequested: boolean = route?.params?.alreadyRequested ?? false;
   const [sending, setSending] = useState(false);
-  const [sent, setSent] = useState(false);
+  const [sent, setSent] = useState(alreadyRequested);
   const [dialog, setDialog] = useState<{ visible: boolean; success: boolean; message: string }>({
     visible: false, success: true, message: '',
   });
@@ -46,8 +47,8 @@ export const ConnectPetProfileScreen: React.FC<ConnectPetProfileScreenProps> = (
     }
   }, [dialog.visible]);
 
+  const petName = feedItem?.petName || '—';
   const ownerName = feedItem?.ownerName || '—';
-  const pets = feedItem?.pets ?? [];
 
   const showDialog = (success: boolean, message: string) =>
     setDialog({ visible: true, success, message });
@@ -57,9 +58,9 @@ export const ConnectPetProfileScreen: React.FC<ConnectPetProfileScreenProps> = (
     if (sent) return;
     try {
       setSending(true);
-      await apiPost('/api/walk/requests', { invitationId: feedItem.id });
+      await apiPost('/api/date/requests', { invitationId: feedItem.id });
       setSent(true);
-      showDialog(true, `Your walk request has been sent to ${ownerName}. They'll be notified shortly.`);
+      showDialog(true, `Your date request for ${petName} has been sent to ${ownerName}. They'll be notified shortly.`);
     } catch (e: any) {
       showDialog(false, e.message || 'Failed to send request. Please try again.');
     } finally {
@@ -67,136 +68,120 @@ export const ConnectPetProfileScreen: React.FC<ConnectPetProfileScreenProps> = (
     }
   };
 
+  const petMetaLine = [
+    feedItem?.petBreed,
+    feedItem?.petAge,
+    feedItem?.petGender === 'FEMALE' ? 'Female' : feedItem?.petGender === 'MALE' ? 'Male' : '',
+  ].filter(Boolean).join(' · ');
+
   return (
     <View style={styles.container}>
       <ScrollView
         contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
         showsVerticalScrollIndicator={false}
       >
-        {/* Hero — owner avatar */}
+        {/* Hero — pet photo */}
         <View style={[styles.hero, { paddingTop: insets.top + 8 }]}>
           <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
             <Text style={styles.backArrow}>←</Text>
           </TouchableOpacity>
-          {feedItem?.ownerAvatarUrl ? (
-            <Image source={{ uri: feedItem.ownerAvatarUrl }} style={styles.heroImage} />
+          {feedItem?.petProfilePhotoUrl ? (
+            <Image source={{ uri: feedItem.petProfilePhotoUrl }} style={styles.heroImage} />
           ) : (
             <View style={styles.heroAvatarFallback}>
-              <Text style={styles.heroAvatarText}>{ownerName.charAt(0).toUpperCase()}</Text>
+              <Text style={styles.heroAvatarEmoji}>
+                {feedItem?.petSpecies === 'CAT' ? '🐱' : '🐕'}
+              </Text>
             </View>
           )}
         </View>
 
-        {/* Available badge */}
+        {/* Looking badge */}
         <View style={styles.availableWrap}>
           <View style={styles.availableBadge}>
             <View style={styles.availableDot} />
-            <Text style={styles.availableText}>Available</Text>
+            <Text style={styles.availableText}>Looking for a Date</Text>
           </View>
         </View>
 
         {/* Content */}
         <View style={styles.contentCard}>
-          <Text style={styles.ownerNameLarge}>{ownerName}</Text>
+          <Text style={styles.petNameLarge}>{petName}</Text>
+          {petMetaLine ? <Text style={styles.petMetaLine}>{petMetaLine}</Text> : null}
 
           <View style={styles.divider} />
 
           {/* Stats */}
           <View style={styles.statsRow}>
             <View style={styles.statBox}>
-              <Text style={styles.statIcon}>🐾</Text>
-              <Text style={styles.statValue}>{pets.length}</Text>
-              <Text style={styles.statLabel}>Pets</Text>
+              <Text style={styles.statIcon}>🎂</Text>
+              <Text style={styles.statValue}>{feedItem?.petAge || '—'}</Text>
+              <Text style={styles.statLabel}>Age</Text>
             </View>
             <View style={styles.statBox}>
-              <Text style={styles.statIcon}>⏱</Text>
-              <Text style={styles.statValue}>{feedItem?.durationMinutes ? `${feedItem.durationMinutes}m` : '—'}</Text>
-              <Text style={styles.statLabel}>Duration</Text>
+              <Text style={styles.statIcon}>{feedItem?.petGender === 'FEMALE' ? '♀' : '♂'}</Text>
+              <Text style={styles.statValue}>
+                {feedItem?.petGender === 'FEMALE' ? 'Female' : feedItem?.petGender === 'MALE' ? 'Male' : '—'}
+              </Text>
+              <Text style={styles.statLabel}>Gender</Text>
             </View>
             <View style={styles.statBox}>
-              <Text style={styles.statIcon}>👥</Text>
-              <Text style={styles.statValue}>{feedItem?.spotsLeft ?? '—'}</Text>
-              <Text style={styles.statLabel}>Spots Left</Text>
+              <Text style={styles.statIcon}>📏</Text>
+              <Text style={styles.statValue}>{feedItem?.distanceLabel || '—'}</Text>
+              <Text style={styles.statLabel}>Away</Text>
             </View>
           </View>
 
-          {/* Walk invitation details */}
-          {feedItem && (
-            <>
-              <Text style={styles.sectionTitle}>Walking Invitation</Text>
-              <View style={styles.invitationCard}>
-                <View style={styles.invRow}>
-                  <Text style={styles.invIcon}>📍</Text>
-                  <Text style={styles.invText}>{feedItem.route || '—'}</Text>
-                </View>
-                <View style={styles.invRow}>
-                  <Text style={styles.invIcon}>🗓</Text>
-                  <Text style={styles.invText}>{feedItem.date} · {feedItem.time}</Text>
-                </View>
-                {feedItem.durationMinutes > 0 && (
-                  <View style={styles.invRow}>
-                    <Text style={styles.invIcon}>⏱</Text>
-                    <Text style={styles.invText}>{feedItem.durationMinutes} min</Text>
-                  </View>
-                )}
-                {feedItem.distanceLabel ? (
-                  <View style={styles.invRow}>
-                    <Text style={styles.invIcon}>📏</Text>
-                    <Text style={styles.invText}>{feedItem.distanceLabel} away</Text>
-                  </View>
-                ) : null}
-                {feedItem.message ? (
-                  <View style={styles.invRow}>
-                    <Text style={styles.invIcon}>💬</Text>
-                    <Text style={styles.invText}>{feedItem.message}</Text>
-                  </View>
-                ) : null}
-              </View>
-            </>
+          {/* Health tags */}
+          {(feedItem?.petIsVaccinated || feedItem?.petIsNeutered) && (
+            <View style={styles.tagsRow}>
+              {feedItem.petIsVaccinated && (
+                <View style={styles.tag}><Text style={styles.tagText}>✅ Vaccinated</Text></View>
+              )}
+              {feedItem.petIsNeutered && (
+                <View style={styles.tag}><Text style={styles.tagText}>✔ Neutered</Text></View>
+              )}
+            </View>
           )}
 
-          {/* Pets */}
-          {pets.length > 0 && (
+          {/* Date invitation details */}
+          <Text style={styles.sectionTitle}>💕 Date Invitation</Text>
+          <View style={styles.invitationCard}>
+            <View style={styles.invRow}>
+              <Text style={styles.invIcon}>📍</Text>
+              <Text style={styles.invText}>{feedItem?.location || '—'}</Text>
+            </View>
+            <View style={styles.invRow}>
+              <Text style={styles.invIcon}>🗓</Text>
+              <Text style={styles.invText}>
+                {[feedItem?.date, feedItem?.time].filter(Boolean).join(' · ') || '—'}
+              </Text>
+            </View>
+          </View>
+
+          {/* Message from owner */}
+          {feedItem?.message ? (
             <>
-              <Text style={styles.sectionTitle}>🐾 Pets Going on the Walk</Text>
-              {pets.map(pet => {
-                const petTags: string[] = [];
-                if (pet.petIsVaccinated) petTags.push('Vaccinated');
-                if (pet.petIsNeutered) petTags.push('Neutered');
-                return (
-                  <View key={pet.petId} style={styles.petRow}>
-                    {pet.petProfilePhotoUrl ? (
-                      <Image source={{ uri: pet.petProfilePhotoUrl }} style={styles.petAvatar} />
-                    ) : (
-                      <View style={styles.petAvatarFallback}>
-                        <Text style={styles.petAvatarEmoji}>
-                          {pet.petSpecies === 'CAT' ? '🐈' : '🐕'}
-                        </Text>
-                      </View>
-                    )}
-                    <View style={styles.petInfo}>
-                      <Text style={styles.petName}>{pet.petName}</Text>
-                      <Text style={styles.petMeta}>
-                        {[pet.petBreed, pet.petAge, pet.petGender === 'FEMALE' ? 'Female' : pet.petGender === 'MALE' ? 'Male' : '']
-                          .filter(Boolean).join(' · ')}
-                      </Text>
-                      {petTags.length > 0 && (
-                        <View style={styles.tagsRow}>
-                          {petTags.map(tag => (
-                            <View key={tag} style={styles.tag}>
-                              <Text style={styles.tagText}>
-                                {tag === 'Vaccinated' ? '✅ ' : '✔ '}{tag}
-                              </Text>
-                            </View>
-                          ))}
-                        </View>
-                      )}
-                    </View>
-                  </View>
-                );
-              })}
+              <Text style={styles.sectionTitle}>💬 Message from {ownerName}</Text>
+              <View style={styles.messageCard}>
+                <Text style={styles.messageQuote}>"</Text>
+                <Text style={styles.messageText}>{feedItem.message}</Text>
+              </View>
             </>
-          )}
+          ) : null}
+
+          {/* Owner */}
+          <Text style={styles.sectionTitle}>👤 Owner</Text>
+          <View style={styles.ownerRow}>
+            {feedItem?.ownerAvatarUrl ? (
+              <Image source={{ uri: feedItem.ownerAvatarUrl }} style={styles.ownerAvatarImg} />
+            ) : (
+              <View style={styles.ownerAvatar}>
+                <Text style={styles.ownerAvatarText}>{ownerName.charAt(0).toUpperCase()}</Text>
+              </View>
+            )}
+            <Text style={styles.ownerName}>{ownerName}</Text>
+          </View>
         </View>
       </ScrollView>
 
@@ -209,28 +194,21 @@ export const ConnectPetProfileScreen: React.FC<ConnectPetProfileScreenProps> = (
         >
           {sending
             ? <ActivityIndicator color="#FFFFFF" />
-            : <Text style={styles.ctaText}>{sent ? '✓  Request Sent' : 'Send Walk Request →'}</Text>}
+            : <Text style={styles.ctaText}>{sent ? '✓  Request Sent' : 'Send Date Request 💕'}</Text>}
         </TouchableOpacity>
       </View>
 
-      {/* Custom result dialog */}
+      {/* Result dialog */}
       <Modal visible={dialog.visible} transparent animationType="none" statusBarTranslucent>
         <View style={styles.overlay}>
           <Animated.View style={[styles.dialogCard, { transform: [{ scale: scaleAnim }], opacity: opacityAnim }]}>
-            {/* Icon */}
             <View style={[styles.dialogIcon, dialog.success ? styles.dialogIconSuccess : styles.dialogIconError]}>
-              <Text style={styles.dialogIconText}>{dialog.success ? '🐾' : '⚠️'}</Text>
+              <Text style={styles.dialogIconText}>{dialog.success ? '💕' : '⚠️'}</Text>
             </View>
-
-            {/* Title */}
             <Text style={styles.dialogTitle}>
               {dialog.success ? 'Request Sent!' : 'Something went wrong'}
             </Text>
-
-            {/* Message */}
             <Text style={styles.dialogMessage}>{dialog.message}</Text>
-
-            {/* Owner chip — only on success */}
             {dialog.success && (
               <View style={styles.dialogOwnerChip}>
                 {feedItem?.ownerAvatarUrl ? (
@@ -243,8 +221,6 @@ export const ConnectPetProfileScreen: React.FC<ConnectPetProfileScreenProps> = (
                 <Text style={styles.dialogOwnerName}>{ownerName}</Text>
               </View>
             )}
-
-            {/* Button(s) */}
             <View style={styles.dialogActions}>
               {dialog.success ? (
                 <TouchableOpacity
@@ -274,7 +250,7 @@ export const ConnectPetProfileScreen: React.FC<ConnectPetProfileScreenProps> = (
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFFFFF' },
   hero: {
-    backgroundColor: '#FDECEA',
+    backgroundColor: COLORS.purpleLight,
     height: 260,
     alignItems: 'center',
     justifyContent: 'center',
@@ -287,6 +263,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.85)',
     alignItems: 'center',
     justifyContent: 'center',
+    zIndex: 10,
   },
   backArrow: { fontSize: 20, color: COLORS.text, fontWeight: '600' },
   heroImage: {
@@ -300,13 +277,13 @@ const styles = StyleSheet.create({
     width: 130, height: 130,
     borderRadius: 65,
     marginTop: 20,
-    backgroundColor: COLORS.primary,
+    backgroundColor: '#EDE9FE',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 3,
     borderColor: '#FFFFFF',
   },
-  heroAvatarText: { fontSize: 52, fontWeight: '700', color: '#FFFFFF' },
+  heroAvatarEmoji: { fontSize: 56 },
   availableWrap: { alignItems: 'center', marginTop: -18, zIndex: 10 },
   availableBadge: {
     flexDirection: 'row',
@@ -322,7 +299,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 4,
   },
-  availableDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#22C55E' },
+  availableDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.purple },
   availableText: { fontSize: 13, fontWeight: '600', color: COLORS.text },
   contentCard: {
     backgroundColor: '#FFFFFF',
@@ -332,36 +309,10 @@ const styles = StyleSheet.create({
     padding: 24,
     paddingBottom: 8,
   },
-  ownerNameLarge: { fontSize: 26, fontWeight: '800', color: COLORS.text, marginBottom: 20 },
-  petRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 14,
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-  },
-  petAvatar: { width: 56, height: 56, borderRadius: 28 },
-  petAvatarFallback: {
-    width: 56, height: 56, borderRadius: 28,
-    backgroundColor: COLORS.primaryLight,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: COLORS.primaryBorder,
-  },
-  petAvatarEmoji: { fontSize: 26 },
-  petInfo: { flex: 1 },
-  petName: { fontSize: 16, fontWeight: '700', color: COLORS.text, marginBottom: 2 },
-  petMeta: { fontSize: 13, color: COLORS.textSub, marginBottom: 6 },
+  petNameLarge: { fontSize: 26, fontWeight: '800', color: COLORS.text, marginBottom: 4 },
+  petMetaLine: { fontSize: 14, color: COLORS.textSub, marginBottom: 16 },
   divider: { height: 1, backgroundColor: COLORS.border, marginBottom: 16 },
-  ownerRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20 },
-  ownerAvatar: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: '#FDDDD5',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  ownerAvatarText: { fontSize: 18, fontWeight: '700', color: COLORS.primary },
-  ownerName: { fontSize: 15, fontWeight: '600', color: COLORS.text },
-  statsRow: { flexDirection: 'row', gap: 10, marginBottom: 24 },
+  statsRow: { flexDirection: 'row', gap: 10, marginBottom: 20 },
   statBox: {
     flex: 1,
     backgroundColor: COLORS.bg,
@@ -377,18 +328,31 @@ const styles = StyleSheet.create({
   statLabel: { fontSize: 11, color: COLORS.textMuted },
   sectionTitle: { fontSize: 16, fontWeight: '700', color: COLORS.text, marginBottom: 12 },
   invitationCard: {
-    backgroundColor: '#FFF8F5',
+    backgroundColor: COLORS.purpleLight,
     borderRadius: 14,
     padding: 16,
     gap: 10,
     marginBottom: 20,
     borderWidth: 1,
-    borderColor: '#FFE4D6',
+    borderColor: '#DDD6FE',
   },
   invRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   invIcon: { fontSize: 16, width: 20 },
   invText: { fontSize: 14, color: COLORS.text, flex: 1 },
-  tagsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
+  messageCard: {
+    backgroundColor: COLORS.bg,
+    borderRadius: 14,
+    padding: 16,
+    paddingTop: 10,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderLeftWidth: 4,
+    borderLeftColor: COLORS.purple,
+  },
+  messageQuote: { fontSize: 24, color: COLORS.purple, fontWeight: '800', lineHeight: 26 },
+  messageText: { fontSize: 14, color: COLORS.text, lineHeight: 21, fontStyle: 'italic' },
+  tagsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 },
   tag: {
     backgroundColor: '#F0FDF4',
     paddingHorizontal: 12,
@@ -398,6 +362,15 @@ const styles = StyleSheet.create({
     borderColor: '#BBF7D0',
   },
   tagText: { fontSize: 13, color: '#15803D', fontWeight: '500' },
+  ownerRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20 },
+  ownerAvatar: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: '#EDE9FE',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  ownerAvatarImg: { width: 40, height: 40, borderRadius: 20 },
+  ownerAvatarText: { fontSize: 18, fontWeight: '700', color: COLORS.purple },
+  ownerName: { fontSize: 15, fontWeight: '600', color: COLORS.text },
   ctaWrap: {
     position: 'absolute',
     bottom: 0, left: 0, right: 0,
@@ -406,11 +379,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   ctaBtn: {
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.purple,
     borderRadius: 100,
     paddingVertical: 18,
     alignItems: 'center',
-    shadowColor: COLORS.primary,
+    shadowColor: COLORS.purple,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 10,
@@ -451,7 +424,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 20,
   },
-  dialogIconSuccess: { backgroundColor: '#FFF3E8', borderWidth: 2, borderColor: COLORS.primaryBorder },
+  dialogIconSuccess: { backgroundColor: COLORS.purpleLight, borderWidth: 2, borderColor: '#DDD6FE' },
   dialogIconError: { backgroundColor: '#FEF2F2', borderWidth: 2, borderColor: '#FECACA' },
   dialogIconText: { fontSize: 36 },
   dialogTitle: {
@@ -483,7 +456,7 @@ const styles = StyleSheet.create({
   dialogOwnerAvatar: { width: 32, height: 32, borderRadius: 16 },
   dialogOwnerAvatarFallback: {
     width: 32, height: 32, borderRadius: 16,
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.purple,
     alignItems: 'center', justifyContent: 'center',
   },
   dialogOwnerInitial: { fontSize: 14, fontWeight: '700', color: '#FFFFFF' },
@@ -495,11 +468,11 @@ const styles = StyleSheet.create({
   },
   dialogBtnPrimary: {
     flex: 1,
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.purple,
     borderRadius: 100,
     paddingVertical: 14,
     alignItems: 'center',
-    shadowColor: COLORS.primary,
+    shadowColor: COLORS.purple,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,

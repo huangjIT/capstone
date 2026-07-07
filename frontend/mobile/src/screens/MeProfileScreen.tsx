@@ -1,14 +1,46 @@
-import React from 'react';
+import React, { useState, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
   ScrollView,
   TouchableOpacity,
   StyleSheet,
+  ActivityIndicator,
+  RefreshControl,
+  Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { COLORS } from '../constants/colors';
-import { clearToken } from '../utils/api';
+import { clearToken, apiGet } from '../utils/api';
+
+interface UserProfile {
+  id: string;
+  name: string;
+  email: string;
+  bio?: string;
+  location?: string;
+  avatarUrl?: string;
+}
+
+interface Pet {
+  id: string;
+  name: string;
+  species: string;
+  breed?: string;
+  gender?: string;
+  isVaccinated?: boolean;
+  isNeutered?: boolean;
+  bio?: string;
+  profilePhotoUrl?: string;
+}
+
+interface Stats {
+  posts: number;
+  pets: number;
+  friends: number;
+}
 
 interface MeProfileScreenProps {
   navigation: any;
@@ -16,49 +48,97 @@ interface MeProfileScreenProps {
 
 export const MeProfileScreen: React.FC<MeProfileScreenProps> = ({ navigation }) => {
   const insets = useSafeAreaInsets();
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [pets, setPets] = useState<Pet[]>([]);
+  const [stats, setStats] = useState<Stats>({ posts: 0, pets: 0, friends: 0 });
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const loadData = useCallback(async () => {
+    try {
+      const [profileData, petsData, statsData] = await Promise.all([
+        apiGet<UserProfile>('/api/users/me'),
+        apiGet<Pet[]>('/api/pets/my'),
+        apiGet<Stats>('/api/users/me/stats'),
+      ]);
+      setProfile(profileData);
+      setPets(petsData);
+      setStats(statsData);
+    } catch (e) {
+      // token expired or network error — stay on page, user can sign out
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  // Load on mount and every time screen comes into focus (after EditProfile / AddPet)
+  useFocusEffect(useCallback(() => { loadData(); }, [loadData]));
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    loadData();
+  }, [loadData]);
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+      </View>
+    );
+  }
+
+  const firstPet = pets[0] ?? null;
+
+  const petTags = (pet: Pet) => {
+    const tags: string[] = [];
+    if (pet.isVaccinated) tags.push('Vaccinated');
+    if (pet.isNeutered) tags.push('Neutered');
+    if (tags.length === 0) tags.push(pet.species);
+    return tags;
+  };
 
   return (
     <ScrollView
       style={styles.container}
       contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 20 }]}
       showsVerticalScrollIndicator={false}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
     >
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <View style={styles.headerLeft}>
-          <Text style={styles.headerTitle}>👤 My Profile</Text>
-        </View>
-        <View style={styles.headerRight}>
-          <TouchableOpacity style={styles.iconBtn}>
-            <Text style={styles.iconBtnText}>⚙️</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
+        <Text style={styles.headerTitle}>My Profile</Text>
+        <TouchableOpacity
             style={styles.iconBtn}
             onPress={() => navigation.navigate('Notifications')}
           >
             <Text style={styles.iconBtnText}>🔔</Text>
-            <View style={styles.notifBadge}>
-              <Text style={styles.notifBadgeText}>3</Text>
-            </View>
           </TouchableOpacity>
-        </View>
       </View>
 
       {/* Profile Card */}
       <View style={styles.profileCard}>
         <View style={styles.profileAvatarWrap}>
           <View style={styles.profileAvatar}>
-            <Text style={styles.profileAvatarText}>👩</Text>
+            {profile?.avatarUrl ? (
+              <Image source={{ uri: profile.avatarUrl }} style={styles.profileAvatarImage} />
+            ) : (
+              <Text style={styles.profileAvatarText}>👤</Text>
+            )}
           </View>
-          <View style={styles.editAvatarBadge}>
+          <TouchableOpacity style={styles.editAvatarBadge} onPress={() => navigation.navigate('EditProfile')}>
             <Text style={styles.editAvatarText}>📷</Text>
-          </View>
+          </TouchableOpacity>
         </View>
         <View style={styles.profileInfo}>
-          <Text style={styles.profileName}>Jennifer T.</Text>
-          <Text style={styles.profileBio}>Dog mom 🐕 · Outdoor lover · SF Bay Area</Text>
-          <Text style={styles.profileLocation}>📍 San Francisco, CA</Text>
-          <TouchableOpacity style={styles.editBtn}>
+          <Text style={styles.profileName}>{profile?.name ?? '—'}</Text>
+          {profile?.bio ? (
+            <Text style={styles.profileBio}>{profile.bio}</Text>
+          ) : null}
+          {profile?.location ? (
+            <Text style={styles.profileLocation}>📍 {profile.location}</Text>
+          ) : null}
+          <TouchableOpacity style={styles.editBtn} onPress={() => navigation.navigate('EditProfile')}>
             <Text style={styles.editBtnText}>Edit Profile</Text>
           </TouchableOpacity>
         </View>
@@ -69,84 +149,79 @@ export const MeProfileScreen: React.FC<MeProfileScreenProps> = ({ navigation }) 
         <Text style={styles.cardTitle}>My Activity</Text>
         <View style={styles.statsRow}>
           <View style={styles.statItem}>
-            <Text style={styles.statValue}>12</Text>
-            <Text style={styles.statLabel}>Walks</Text>
+            <Text style={styles.statValue}>{stats.posts}</Text>
+            <Text style={styles.statLabel}>Posts</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
-            <Text style={styles.statValue}>5</Text>
-            <Text style={styles.statLabel}>Date Requests</Text>
+            <Text style={styles.statValue}>{stats.friends}</Text>
+            <Text style={styles.statLabel}>Friends</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
-            <Text style={styles.statValue}>8</Text>
-            <Text style={styles.statLabel}>Items Sold</Text>
+            <Text style={styles.statValue}>{stats.pets}</Text>
+            <Text style={styles.statLabel}>Pets</Text>
           </View>
         </View>
       </View>
 
-      {/* My Pet */}
+      {/* My Pets */}
       <View style={styles.sectionCard}>
         <View style={styles.sectionHeader}>
-          <Text style={styles.cardTitle}>🐾 My Pet</Text>
-          <TouchableOpacity>
+          <Text style={styles.cardTitle}>🐾 My Pets</Text>
+          <TouchableOpacity onPress={() => navigation.navigate('AddPet')}>
             <Text style={styles.addPetText}>+ Add Pet</Text>
           </TouchableOpacity>
         </View>
-        <View style={styles.petRow}>
-          <View style={styles.petAvatarContainer}>
-            <Text style={styles.petAvatarEmoji}>🐕</Text>
-          </View>
-          <View style={styles.petInfo}>
-            <Text style={styles.petName}>Buddy</Text>
-            <Text style={styles.petBreed}>Golden Retriever · 3y · ♂</Text>
-            <View style={styles.petTagsRow}>
-              <View style={styles.petTag}>
-                <Text style={styles.petTagText}>Friendly</Text>
-              </View>
-              <View style={styles.petTag}>
-                <Text style={styles.petTagText}>Vaccinated</Text>
-              </View>
-              <View style={styles.petTag}>
-                <Text style={styles.petTagText}>Trained</Text>
-              </View>
-            </View>
-          </View>
-          <TouchableOpacity style={styles.viewProfileBtn}>
-            <Text style={styles.viewProfileText}>View</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
 
-      {/* Menu Items */}
-      <View style={styles.menuCard}>
-        {[
-          { icon: '🚶', label: 'Walk History', sub: '12 walks completed' },
-          { icon: '💕', label: 'Date Requests', sub: '5 sent · 3 received' },
-          { icon: '🛍️', label: 'My Listings', sub: '8 items sold' },
-          { icon: '⭐', label: 'Reviews', sub: '4.8 avg · 18 reviews' },
-          { icon: '❤️', label: 'Saved Pets', sub: '6 bookmarks' },
-        ].map((item, idx) => (
-          <TouchableOpacity
-            key={item.label}
-            style={[styles.menuItem, idx > 0 && styles.menuItemBorder]}
-          >
-            <View style={styles.menuIconWrap}>
-              <Text style={styles.menuIcon}>{item.icon}</Text>
+        {pets.length === 0 ? (
+          <View style={styles.emptyPets}>
+            <Text style={styles.emptyPetsText}>No pets yet. Add your first pet!</Text>
+          </View>
+        ) : (
+          pets.map((pet, idx) => (
+            <View key={pet.id} style={[styles.petRow, idx > 0 && styles.petRowBorder]}>
+              <View style={styles.petAvatarContainer}>
+                {pet.profilePhotoUrl ? (
+                  <Image source={{ uri: pet.profilePhotoUrl }} style={styles.petAvatarImage} />
+                ) : (
+                  <Text style={styles.petAvatarEmoji}>
+                    {pet.species === 'CAT' ? '🐈' : '🐕'}
+                  </Text>
+                )}
+              </View>
+              <View style={styles.petInfo}>
+                <Text style={styles.petName}>{pet.name}</Text>
+                <Text style={styles.petBreed}>
+                  {[pet.breed, pet.gender].filter(Boolean).join(' · ')}
+                </Text>
+                <View style={styles.petTagsRow}>
+                  {petTags(pet).map(tag => (
+                    <View key={tag} style={styles.petTag}>
+                      <Text style={styles.petTagText}>{tag}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+              <TouchableOpacity
+                style={styles.viewProfileBtn}
+                onPress={() => navigation.navigate('EditPet', { pet })}
+              >
+                <Text style={styles.viewProfileText}>Edit</Text>
+              </TouchableOpacity>
             </View>
-            <View style={styles.menuContent}>
-              <Text style={styles.menuLabel}>{item.label}</Text>
-              <Text style={styles.menuSub}>{item.sub}</Text>
-            </View>
-            <Text style={styles.menuArrow}>›</Text>
-          </TouchableOpacity>
-        ))}
+          ))
+        )}
       </View>
 
       {/* Sign Out */}
       <TouchableOpacity
         style={styles.signOutBtn}
-        onPress={async () => { await clearToken(); navigation.reset({ index: 0, routes: [{ name: 'Login' }] }); }}
+        onPress={async () => {
+          await clearToken();
+          try { await GoogleSignin.signOut(); } catch (_) {}
+          navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+        }}
       >
         <Text style={styles.signOutText}>Sign Out</Text>
       </TouchableOpacity>
@@ -155,6 +230,12 @@ export const MeProfileScreen: React.FC<MeProfileScreenProps> = ({ navigation }) 
 };
 
 const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.bg,
+  },
   container: {
     flex: 1,
     backgroundColor: COLORS.bg,
@@ -170,7 +251,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
   },
-  headerLeft: {},
   headerTitle: {
     fontSize: 22,
     fontWeight: '800',
@@ -187,26 +267,9 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.bg,
     alignItems: 'center',
     justifyContent: 'center',
-    position: 'relative',
   },
   iconBtnText: {
     fontSize: 20,
-  },
-  notifBadge: {
-    position: 'absolute',
-    top: 4,
-    right: 4,
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: COLORS.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  notifBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 10,
-    fontWeight: '700',
   },
   profileCard: {
     backgroundColor: COLORS.card,
@@ -238,6 +301,11 @@ const styles = StyleSheet.create({
   },
   profileAvatarText: {
     fontSize: 38,
+  },
+  profileAvatarImage: {
+    width: 76,
+    height: 76,
+    borderRadius: 38,
   },
   editAvatarBadge: {
     position: 'absolute',
@@ -352,10 +420,25 @@ const styles = StyleSheet.create({
     color: COLORS.primary,
     fontWeight: '700',
   },
+  emptyPets: {
+    alignItems: 'center',
+    paddingVertical: 20,
+  },
+  emptyPetsText: {
+    fontSize: 14,
+    color: COLORS.textMuted,
+  },
   petRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    paddingVertical: 8,
+  },
+  petRowBorder: {
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+    marginTop: 8,
+    paddingTop: 16,
   },
   petAvatarContainer: {
     width: 56,
@@ -367,6 +450,11 @@ const styles = StyleSheet.create({
   },
   petAvatarEmoji: {
     fontSize: 28,
+  },
+  petAvatarImage: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
   },
   petInfo: {
     flex: 1,
@@ -411,56 +499,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.primary,
     fontWeight: '700',
-  },
-  menuCard: {
-    backgroundColor: COLORS.card,
-    margin: 16,
-    marginBottom: 0,
-    borderRadius: 18,
-    overflow: 'hidden',
-    shadowColor: COLORS.shadow,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 1,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  menuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    gap: 12,
-  },
-  menuItemBorder: {
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-  },
-  menuIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: COLORS.bg,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  menuIcon: {
-    fontSize: 20,
-  },
-  menuContent: {
-    flex: 1,
-  },
-  menuLabel: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: COLORS.text,
-    marginBottom: 2,
-  },
-  menuSub: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-  },
-  menuArrow: {
-    fontSize: 20,
-    color: COLORS.textMuted,
   },
   signOutBtn: {
     margin: 16,

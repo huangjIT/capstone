@@ -7,10 +7,22 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
+  ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { COLORS } from '../constants/colors';
 import { RouteMapPicker } from '../components/RouteMapPicker';
+import { apiPut, apiDelete } from '../utils/api';
+
+function formatDate(d: Date): string {
+  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function formatTime(d: Date): string {
+  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+}
 
 interface EditInvitationScreenProps {
   navigation: any;
@@ -21,13 +33,41 @@ export const EditInvitationScreen: React.FC<EditInvitationScreenProps> = ({ navi
   const insets = useSafeAreaInsets();
   const invitation = navRoute?.params?.invitation;
 
-  const [routeText, setRouteText] = useState(invitation?.route || 'Riverside Park → Elm St');
+  const [routeText, setRouteText] = useState(invitation?.route || '');
+  const [routeCoords, setRouteCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [mapVisible, setMapVisible] = useState(false);
-  const [date, setDate] = useState(invitation?.date || 'Sat, Jun 7, 2026');
-  const [time, setTime] = useState(invitation?.time || '7:00 AM');
-  const [duration, setDuration] = useState('45');
-  const [pace, setPace] = useState('Moderate');
-  const [requirements, setRequirements] = useState('');
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [selectedTime, setSelectedTime] = useState<Date | null>(null);
+  const [datePickerVisible, setDatePickerVisible] = useState(false);
+  const [timePickerVisible, setTimePickerVisible] = useState(false);
+  const [duration, setDuration] = useState(String(invitation?.durationMinutes || 60));
+  const [maxSpots, setMaxSpots] = useState(String(invitation?.maxSpots || 4));
+  const [message, setMessage] = useState(invitation?.message || '');
+  const [saving, setSaving] = useState(false);
+  const [withdrawing, setWithdrawing] = useState(false);
+
+  const dateLabel = selectedDate ? formatDate(selectedDate) : (invitation?.date || 'Select date');
+  const timeLabel = selectedTime ? formatTime(selectedTime) : (invitation?.time || 'Select time');
+
+  const handleSave = async () => {
+    try {
+      setSaving(true);
+      await apiPut(`/api/walk/invitations/${invitation.id}`, {
+        route: routeText.trim(),
+        ...(routeCoords ? { latitude: routeCoords.latitude, longitude: routeCoords.longitude } : {}),
+        date: selectedDate ? formatDate(selectedDate) : (invitation?.date || ''),
+        time: selectedTime ? formatTime(selectedTime) : (invitation?.time || ''),
+        message: message.trim() || undefined,
+        durationMinutes: parseInt(duration, 10) || 60,
+        maxSpots: parseInt(maxSpots, 10) || 4,
+      });
+      navigation.goBack();
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleWithdraw = () => {
     Alert.alert(
@@ -38,7 +78,17 @@ export const EditInvitationScreen: React.FC<EditInvitationScreenProps> = ({ navi
         {
           text: 'Withdraw',
           style: 'destructive',
-          onPress: () => navigation.goBack(),
+          onPress: async () => {
+            try {
+              setWithdrawing(true);
+              await apiDelete(`/api/walk/invitations/${invitation.id}`);
+              navigation.goBack();
+            } catch (e: any) {
+              Alert.alert('Error', e.message || 'Failed to withdraw');
+            } finally {
+              setWithdrawing(false);
+            }
+          },
         },
       ]
     );
@@ -49,7 +99,24 @@ export const EditInvitationScreen: React.FC<EditInvitationScreenProps> = ({ navi
       <RouteMapPicker
         visible={mapVisible}
         onClose={() => setMapVisible(false)}
-        onConfirm={(r) => { setRouteText(r); setMapVisible(false); }}
+        onConfirm={(r, startCoord) => { setRouteText(r); setRouteCoords(startCoord); setMapVisible(false); }}
+      />
+      <DateTimePickerModal
+        isVisible={datePickerVisible}
+        mode="date"
+        minimumDate={new Date()}
+        onConfirm={(d) => { setSelectedDate(d); setDatePickerVisible(false); }}
+        onCancel={() => setDatePickerVisible(false)}
+        display={Platform.OS === 'ios' ? 'inline' : 'default'}
+        accentColor={COLORS.primary}
+      />
+      <DateTimePickerModal
+        isVisible={timePickerVisible}
+        mode="time"
+        onConfirm={(d) => { setSelectedTime(d); setTimePickerVisible(false); }}
+        onCancel={() => setTimePickerVisible(false)}
+        display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+        accentColor={COLORS.primary}
       />
 
       <ScrollView
@@ -85,22 +152,26 @@ export const EditInvitationScreen: React.FC<EditInvitationScreenProps> = ({ navi
           {/* Date */}
           <View style={styles.fieldGroup}>
             <Text style={styles.fieldLabel}>📅 Date</Text>
-            <TouchableOpacity style={styles.selectInput}>
-              <Text style={styles.selectInputText}>{date}</Text>
-              <Text style={styles.selectArrow}>▼</Text>
+            <TouchableOpacity style={styles.selectInput} onPress={() => setDatePickerVisible(true)}>
+              <Text style={selectedDate ? styles.selectText : styles.selectPlaceholder}>
+                {dateLabel}
+              </Text>
+              <Text style={styles.selectArrow}>📅</Text>
             </TouchableOpacity>
           </View>
 
           {/* Time */}
           <View style={styles.fieldGroup}>
             <Text style={styles.fieldLabel}>⏰ Start Time</Text>
-            <TouchableOpacity style={styles.selectInput}>
-              <Text style={styles.selectInputText}>{time}</Text>
-              <Text style={styles.selectArrow}>▼</Text>
+            <TouchableOpacity style={styles.selectInput} onPress={() => setTimePickerVisible(true)}>
+              <Text style={selectedTime ? styles.selectText : styles.selectPlaceholder}>
+                {timeLabel}
+              </Text>
+              <Text style={styles.selectArrow}>🕐</Text>
             </TouchableOpacity>
           </View>
 
-          {/* Duration & Pace */}
+          {/* Duration & Spots */}
           <View style={styles.rowFields}>
             <View style={[styles.fieldGroup, { flex: 1 }]}>
               <Text style={styles.fieldLabel}>⏱ Duration (min)</Text>
@@ -114,23 +185,24 @@ export const EditInvitationScreen: React.FC<EditInvitationScreenProps> = ({ navi
             </View>
             <View style={styles.rowSpacer} />
             <View style={[styles.fieldGroup, { flex: 1 }]}>
-              <Text style={styles.fieldLabel}>🚶 Walking Pace</Text>
+              <Text style={styles.fieldLabel}>👥 Max Spots</Text>
               <TextInput
                 style={styles.input}
-                value={pace}
-                onChangeText={setPace}
+                value={maxSpots}
+                onChangeText={setMaxSpots}
+                keyboardType="number-pad"
                 placeholderTextColor={COLORS.textMuted}
               />
             </View>
           </View>
 
-          {/* Partner Requirements */}
+          {/* Message */}
           <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>📝 Partner Requirements</Text>
+            <Text style={styles.fieldLabel}>💬 Message (optional)</Text>
             <TextInput
               style={[styles.input, styles.textArea]}
-              value={requirements}
-              onChangeText={setRequirements}
+              value={message}
+              onChangeText={setMessage}
               placeholder="e.g. Friendly dogs only, no rush..."
               placeholderTextColor={COLORS.textMuted}
               multiline
@@ -143,11 +215,15 @@ export const EditInvitationScreen: React.FC<EditInvitationScreenProps> = ({ navi
 
       {/* Bottom actions */}
       <View style={[styles.bottomActions, { paddingBottom: insets.bottom + 16 }]}>
-        <TouchableOpacity style={styles.saveBtn} onPress={() => navigation.goBack()}>
-          <Text style={styles.saveBtnText}>💾  Save Changes</Text>
+        <TouchableOpacity style={[styles.saveBtn, saving && { opacity: 0.6 }]} onPress={handleSave} disabled={saving}>
+          {saving
+            ? <ActivityIndicator color="#fff" />
+            : <Text style={styles.saveBtnText}>💾  Save Changes</Text>}
         </TouchableOpacity>
-        <TouchableOpacity style={styles.withdrawBtn} onPress={handleWithdraw}>
-          <Text style={styles.withdrawBtnText}>🗑  Withdraw Invitation</Text>
+        <TouchableOpacity style={[styles.withdrawBtn, withdrawing && { opacity: 0.6 }]} onPress={handleWithdraw} disabled={withdrawing}>
+          {withdrawing
+            ? <ActivityIndicator color="#EF4444" />
+            : <Text style={styles.withdrawBtnText}>🗑  Withdraw Invitation</Text>}
         </TouchableOpacity>
       </View>
     </View>
@@ -198,17 +274,15 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  selectInputText: { fontSize: 15, color: COLORS.text },
-  selectArrow: { fontSize: 12, color: COLORS.textMuted },
+  selectText: { fontSize: 15, color: COLORS.text, flex: 1 },
+  selectPlaceholder: { fontSize: 15, color: COLORS.textMuted, flex: 1 },
+  selectArrow: { fontSize: 16, marginLeft: 8 },
   textArea: { height: 90, paddingTop: 12 },
   rowFields: { flexDirection: 'row' },
   rowSpacer: { width: 12 },
-
   bottomActions: {
     position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
+    bottom: 0, left: 0, right: 0,
     backgroundColor: COLORS.card,
     borderTopWidth: 1,
     borderTopColor: COLORS.border,

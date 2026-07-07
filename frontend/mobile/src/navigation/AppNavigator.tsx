@@ -8,6 +8,9 @@ import { WalkRequestDetailScreen } from '../screens/WalkRequestDetailScreen';
 import { NotificationDetailScreen } from '../screens/NotificationDetailScreen';
 import { OwnerProfileScreen } from '../screens/OwnerProfileScreen';
 import { MarketplaceChatScreen } from '../screens/MarketplaceChatScreen';
+import { EditProfileScreen } from '../screens/EditProfileScreen';
+import { AddPetScreen } from '../screens/AddPetScreen';
+import { EditPetScreen } from '../screens/EditPetScreen';
 
 export type RootStackParamList = {
   Login: undefined;
@@ -18,6 +21,9 @@ export type RootStackParamList = {
   NotificationDetail: { notif?: any };
   OwnerProfile: undefined;
   MarketplaceChat: { item?: any };
+  EditProfile: undefined;
+  AddPet: undefined;
+  EditPet: { pet: any };
 };
 
 const Stack = createStackNavigator<RootStackParamList>();
@@ -33,6 +39,9 @@ export const AppNavigator: React.FC = () => {
       <Stack.Screen name="NotificationDetail" component={NotificationDetailScreen} />
       <Stack.Screen name="OwnerProfile" component={OwnerProfileScreen} />
       <Stack.Screen name="MarketplaceChat" component={MarketplaceChatScreen} />
+      <Stack.Screen name="EditProfile" component={EditProfileScreen} />
+      <Stack.Screen name="AddPet" component={AddPetScreen} />
+      <Stack.Screen name="EditPet" component={EditPetScreen} />
     </Stack.Navigator>
   );
 };

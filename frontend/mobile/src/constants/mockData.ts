@@ -67,6 +67,7 @@ export interface Notification {
   preview: string;
   isNew: boolean;
   categoryLabel: string;
+  avatarUrl?: string;
 }
 
 export interface MarketplaceItem {
