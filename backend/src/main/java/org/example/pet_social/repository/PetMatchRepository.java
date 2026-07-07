@@ -27,6 +27,14 @@ public interface PetMatchRepository extends JpaRepository<PetMatch, Long> {
     // Find all pending matches initiated by a user
     List<PetMatch> findByInitiatedByUser_IdAndMatchStatus(Long initiatedByUserId, String matchStatus);
 
+    // All matches involving any pet the user owns (fetch-joined for DTO mapping)
+    @Query("SELECT pm FROM PetMatch pm " +
+           "JOIN FETCH pm.pet1 p1 JOIN FETCH p1.owner " +
+           "JOIN FETCH pm.pet2 p2 JOIN FETCH p2.owner " +
+           "WHERE p1.owner.id = :userId OR p2.owner.id = :userId " +
+           "ORDER BY pm.updatedAt DESC")
+    List<PetMatch> findMatchesForUser(@Param("userId") Long userId);
+
     // Find matches by type
     List<PetMatch> findByMatchType(String matchType);
 }

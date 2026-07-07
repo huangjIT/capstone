@@ -57,6 +57,10 @@ public class Event {
     @Column(name = "cover_photo_url")
     private String coverPhotoUrl;
 
+    // Emoji shown on invitation cards in the mobile app (e.g. 🌿 for park routes)
+    @Column(length = 8)
+    private String emoji;
+
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
@@ -129,6 +133,9 @@ public class Event {
 
     public String getCoverPhotoUrl() { return coverPhotoUrl; }
     public void setCoverPhotoUrl(String coverPhotoUrl) { this.coverPhotoUrl = coverPhotoUrl; }
+
+    public String getEmoji() { return emoji; }
+    public void setEmoji(String emoji) { this.emoji = emoji; }
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
