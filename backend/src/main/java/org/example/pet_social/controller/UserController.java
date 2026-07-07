@@ -1,42 +1,62 @@
 package org.example.pet_social.controller;
 
+import jakarta.validation.Valid;
+import org.example.pet_social.dto.AuthResponse;
+import org.example.pet_social.dto.LoginRequest;
+import org.example.pet_social.dto.SignupRequest;
 import org.example.pet_social.entity.User;
-import org.example.pet_social.service.UserRegistryService;
+import org.example.pet_social.service.AuthService;
+import org.example.pet_social.service.JwtService;
+import org.example.pet_social.service.UserService;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 /**
- * HTTP layer for user registration.
- *
- * Keep this controller thin:
- * - receive the request
- * - delegate orchestration to UserRegistryService
- * - return the saved user
+ * Legacy auth alias kept for the original frontend/src services; new clients
+ * should use /api/auth (AuthController). Both share AuthService (BCrypt).
  */
 @RestController
-@RequestMapping({"/api/users"})
+@RequestMapping("/api/users")
 public class UserController {
 
-    private final UserRegistryService userRegistryService;
+    private final UserService userService;
+    private final AuthService authService;
+    private final JwtService jwtService;
 
-    public UserController(UserRegistryService userRegistryService) {
-        this.userRegistryService = userRegistryService;
+    public UserController(UserService userService, AuthService authService, JwtService jwtService) {
+        this.userService = userService;
+        this.authService = authService;
+        this.jwtService = jwtService;
     }
 
-    /**
-     * Register a user.
-     *
-     * Flow:
-     * 1) Save user in DB
-     * 2) Initialize Redis runtime state
-     * 3) Return the saved user
-     */
     @PostMapping("/register")
-    public ResponseEntity<User> registerUser(@RequestBody User user) {
-        User savedUser = userRegistryService.registerUser(user);
-        return ResponseEntity.ok(savedUser);
+    public ResponseEntity<AuthResponse> registerUser(@Valid @RequestBody SignupRequest req) {
+        User user = authService.register(req.getName(), req.getEmail(), req.getPassword(),
+                req.getRole(), req.isActive(), req.getMatchPreferencesMask());
+        if (user == null) {
+            return ResponseEntity.badRequest().build();
+        }
+        return ResponseEntity.ok(toResponse(user));
+    }
+
+    @PostMapping("/login")
+    public ResponseEntity<AuthResponse> loginUser(@RequestBody LoginRequest req) {
+        User user = authService.login(req.getEmail(), req.getPassword());
+        if (user == null) {
+            return ResponseEntity.status(401).build();
+        }
+        return ResponseEntity.ok(toResponse(user));
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<AuthResponse> getUser(@PathVariable Long id) {
+        User user = userService.getUserById(id);
+        if (user == null) return ResponseEntity.notFound().build();
+        return ResponseEntity.ok(toResponse(user));
+    }
+
+    private AuthResponse toResponse(User u) {
+        return new AuthResponse(u.getId(), u.getName(), u.getEmail(), u.getRole(), u.isActive(),
+                jwtService.issue(u.getId(), u.getEmail()));
     }
 }
