@@ -3,6 +3,7 @@ import { View, Text, StyleSheet } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
 import { getFocusedRouteNameFromRoute } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/colors';
 import { useWalkBadge } from '../context/WalkBadgeContext';
 import { HomeMapScreen } from '../screens/HomeMapScreen';
@@ -106,17 +107,20 @@ const tabStyles = StyleSheet.create({
 
 export const TabNavigator: React.FC = () => {
   const { pendingCount, unreadMsgCount } = useWalkBadge();
+  const insets = useSafeAreaInsets();
+  // Sit above the Android system navigation bar (edge-to-edge on Android 15+)
+  const tabBarStyle = {
+    backgroundColor: COLORS.card,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+    height: 72 + insets.bottom,
+    paddingBottom: 10 + insets.bottom,
+  };
   return (
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
-        tabBarStyle: {
-          backgroundColor: COLORS.card,
-          borderTopWidth: 1,
-          borderTopColor: COLORS.border,
-          height: 72,
-          paddingBottom: 10,
-        },
+        tabBarStyle,
         tabBarShowLabel: false,
       }}
     >
@@ -139,9 +143,7 @@ export const TabNavigator: React.FC = () => {
             tabBarIcon: ({ focused }) => (
               <TabIcon emoji="🚶" label="Walk" focused={focused} badge={pendingCount > 0 || unreadMsgCount > 0} />
             ),
-            tabBarStyle: hideTabBar
-              ? { display: 'none' }
-              : { backgroundColor: COLORS.card, borderTopWidth: 1, borderTopColor: COLORS.border, height: 72, paddingBottom: 10 },
+            tabBarStyle: hideTabBar ? { display: 'none' as const } : tabBarStyle,
           };
         }}
       />
@@ -155,9 +157,7 @@ export const TabNavigator: React.FC = () => {
             tabBarIcon: ({ focused }) => (
               <TabIcon emoji="💕" label="Date" focused={focused} />
             ),
-            tabBarStyle: hideTabBar
-              ? { display: 'none' }
-              : { backgroundColor: COLORS.card, borderTopWidth: 1, borderTopColor: COLORS.border, height: 72, paddingBottom: 10 },
+            tabBarStyle: hideTabBar ? { display: 'none' as const } : tabBarStyle,
           };
         }}
       />
@@ -171,9 +171,7 @@ export const TabNavigator: React.FC = () => {
             tabBarIcon: ({ focused }) => (
               <TabIcon emoji="🛍️" label="Market" focused={focused} />
             ),
-            tabBarStyle: hideTabBar
-              ? { display: 'none' }
-              : { backgroundColor: COLORS.card, borderTopWidth: 1, borderTopColor: COLORS.border, height: 72, paddingBottom: 10 },
+            tabBarStyle: hideTabBar ? { display: 'none' as const } : tabBarStyle,
           };
         }}
       />

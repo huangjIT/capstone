@@ -92,22 +92,17 @@ export const FindPartnersScreen: React.FC<FindPartnersScreenProps> = ({ navigati
 
   const invAnim = useRef(new Animated.Value(1)).current;
   const isInvVisible = useRef(true);
-  const animating = useRef(false);
 
   const showInv = useCallback(() => {
-    if (isInvVisible.current || animating.current) return;
+    if (isInvVisible.current) return;
     isInvVisible.current = true;
-    animating.current = true;
-    Animated.timing(invAnim, { toValue: 1, duration: 200, useNativeDriver: false })
-      .start(() => { animating.current = false; });
+    Animated.timing(invAnim, { toValue: 1, duration: 200, useNativeDriver: false }).start();
   }, [invAnim]);
 
   const hideInv = useCallback(() => {
-    if (!isInvVisible.current || animating.current) return;
+    if (!isInvVisible.current) return;
     isInvVisible.current = false;
-    animating.current = true;
-    Animated.timing(invAnim, { toValue: 0, duration: 200, useNativeDriver: false })
-      .start(() => { animating.current = false; });
+    Animated.timing(invAnim, { toValue: 0, duration: 200, useNativeDriver: false }).start();
   }, [invAnim]);
 
   const handleScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -115,6 +110,13 @@ export const FindPartnersScreen: React.FC<FindPartnersScreenProps> = ({ navigati
     if (y > 50) hideInv();
     else if (y < 20) showInv();
   }, [hideInv, showInv]);
+
+  // Settle to the correct state at the final scroll position (fast flings can
+  // end inside the 20-50px dead zone without a matching scroll event).
+  const handleScrollEnd = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const y = e.nativeEvent.contentOffset.y;
+    if (y < 50) showInv();
+  }, [showInv]);
 
   const invMaxHeight = invAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 220] });
 
@@ -283,6 +285,8 @@ export const FindPartnersScreen: React.FC<FindPartnersScreenProps> = ({ navigati
         contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 20 }]}
         showsVerticalScrollIndicator={false}
         onScroll={handleScroll}
+        onScrollEndDrag={handleScrollEnd}
+        onMomentumScrollEnd={handleScrollEnd}
         scrollEventThrottle={16}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
       >

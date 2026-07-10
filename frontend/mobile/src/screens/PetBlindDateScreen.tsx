@@ -95,22 +95,17 @@ export const PetBlindDateScreen: React.FC<PetBlindDateScreenProps> = ({ navigati
 
   const datesAnim = useRef(new Animated.Value(1)).current;
   const isDatesVisible = useRef(true);
-  const animating = useRef(false);
 
   const showDates = useCallback(() => {
-    if (isDatesVisible.current || animating.current) return;
+    if (isDatesVisible.current) return;
     isDatesVisible.current = true;
-    animating.current = true;
-    Animated.timing(datesAnim, { toValue: 1, duration: 200, useNativeDriver: false })
-      .start(() => { animating.current = false; });
+    Animated.timing(datesAnim, { toValue: 1, duration: 200, useNativeDriver: false }).start();
   }, [datesAnim]);
 
   const hideDates = useCallback(() => {
-    if (!isDatesVisible.current || animating.current) return;
+    if (!isDatesVisible.current) return;
     isDatesVisible.current = false;
-    animating.current = true;
-    Animated.timing(datesAnim, { toValue: 0, duration: 200, useNativeDriver: false })
-      .start(() => { animating.current = false; });
+    Animated.timing(datesAnim, { toValue: 0, duration: 200, useNativeDriver: false }).start();
   }, [datesAnim]);
 
   const handleScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -118,6 +113,13 @@ export const PetBlindDateScreen: React.FC<PetBlindDateScreenProps> = ({ navigati
     if (y > 50) hideDates();
     else if (y < 20) showDates();
   }, [hideDates, showDates]);
+
+  // Settle to the correct state at the final scroll position (fast flings can
+  // end inside the 20-50px dead zone without a matching scroll event).
+  const handleScrollEnd = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const y = e.nativeEvent.contentOffset.y;
+    if (y < 50) showDates();
+  }, [showDates]);
 
   const datesMaxHeight = datesAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 200] });
 
@@ -269,6 +271,8 @@ export const PetBlindDateScreen: React.FC<PetBlindDateScreenProps> = ({ navigati
         keyExtractor={(item) => item.id}
         showsVerticalScrollIndicator={false}
         onScroll={handleScroll}
+        onScrollEndDrag={handleScrollEnd}
+        onMomentumScrollEnd={handleScrollEnd}
         scrollEventThrottle={16}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.purple} />}
         ListHeaderComponent={
