@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,8 +7,6 @@ import {
   TouchableOpacity,
   ScrollView,
   Animated,
-  NativeSyntheticEvent,
-  NativeScrollEvent,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/colors';
@@ -16,6 +14,7 @@ import { blindDatePets, BlindDatePet } from '../constants/mockData';
 import { fetchBlindDatePets } from '../services/petService';
 import { FilterRow } from '../components/FilterRow';
 import { PetCard } from '../components/PetCard';
+import { useCollapsibleSection } from '../hooks/useCollapsibleSection';
 
 const MY_DATES = [
   {
@@ -55,37 +54,12 @@ export const PetBlindDateScreen: React.FC = () => {
       .catch(() => {});
   }, []);
 
-  // Scroll-based hide/show for My Dates (same pattern as Walk page)
-  const datesAnim = useRef(new Animated.Value(1)).current;
-  const isDatesVisible = useRef(true);
-  const animating = useRef(false);
-
-  const showDates = useCallback(() => {
-    if (isDatesVisible.current || animating.current) return;
-    isDatesVisible.current = true;
-    animating.current = true;
-    Animated.timing(datesAnim, { toValue: 1, duration: 200, useNativeDriver: false })
-      .start(() => { animating.current = false; });
-  }, [datesAnim]);
-
-  const hideDates = useCallback(() => {
-    if (!isDatesVisible.current || animating.current) return;
-    isDatesVisible.current = false;
-    animating.current = true;
-    Animated.timing(datesAnim, { toValue: 0, duration: 200, useNativeDriver: false })
-      .start(() => { animating.current = false; });
-  }, [datesAnim]);
-
-  const handleScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const y = e.nativeEvent.contentOffset.y;
-    if (y > 50) hideDates();
-    else if (y < 20) showDates();
-  }, [hideDates, showDates]);
-
-  const datesMaxHeight = datesAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, 200],
-  });
+  // Scroll-direction hide/show for My Dates (same pattern as Walk page)
+  const {
+    anim: datesAnim,
+    maxHeight: datesMaxHeight,
+    onScroll: handleScroll,
+  } = useCollapsibleSection(200);
 
   const filtered = pets.filter((p) => {
     if (speciesFilter !== 'All' && p.species !== speciesFilter) return false;

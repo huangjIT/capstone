@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,8 +6,6 @@ import {
   TouchableOpacity,
   StyleSheet,
   Animated,
-  NativeSyntheticEvent,
-  NativeScrollEvent,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/colors';
@@ -16,6 +14,7 @@ import { fetchWalkingPartners } from '../services/petService';
 import { fetchMyInvitations } from '../services/invitationService';
 import { FilterRow } from '../components/FilterRow';
 import { PetCard } from '../components/PetCard';
+import { useCollapsibleSection } from '../hooks/useCollapsibleSection';
 
 interface FindPartnersScreenProps {
   navigation: any;
@@ -39,47 +38,12 @@ export const FindPartnersScreen: React.FC<FindPartnersScreenProps> = ({ navigati
       .catch(() => {});
   }, []);
 
-  // Scroll-based hide/show — use position threshold, not direction, to avoid jitter
-  const invAnim = useRef(new Animated.Value(1)).current;
-  const isInvVisible = useRef(true);
-  const animating = useRef(false);
-
-  const showInv = useCallback(() => {
-    if (isInvVisible.current || animating.current) return;
-    isInvVisible.current = true;
-    animating.current = true;
-    Animated.timing(invAnim, {
-      toValue: 1,
-      duration: 200,
-      useNativeDriver: false,
-    }).start(() => { animating.current = false; });
-  }, [invAnim]);
-
-  const hideInv = useCallback(() => {
-    if (!isInvVisible.current || animating.current) return;
-    isInvVisible.current = false;
-    animating.current = true;
-    Animated.timing(invAnim, {
-      toValue: 0,
-      duration: 200,
-      useNativeDriver: false,
-    }).start(() => { animating.current = false; });
-  }, [invAnim]);
-
-  const handleScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const y = e.nativeEvent.contentOffset.y;
-    // Hide when scrolled down past 50px; show when back near top (< 20px hysteresis)
-    if (y > 50) {
-      hideInv();
-    } else if (y < 20) {
-      showInv();
-    }
-  }, [hideInv, showInv]);
-
-  const invMaxHeight = invAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, 220],
-  });
+  // Scroll-direction hide/show: scrolling up hides, scrolling down reveals
+  const {
+    anim: invAnim,
+    maxHeight: invMaxHeight,
+    onScroll: handleScroll,
+  } = useCollapsibleSection(220);
 
   const filtered = partners.filter((p) => {
     if (typeFilter !== 'All') {
