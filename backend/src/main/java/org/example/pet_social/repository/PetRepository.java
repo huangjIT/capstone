@@ -26,4 +26,13 @@ public interface PetRepository extends JpaRepository<Pet, Long> {
     List<Pet> findByIsAvailableForPlaydate(Boolean isAvailable);
 
     List<Pet> findByOwner_IdAndSpecies(Long ownerId, String species);
+
+    Long countByOwner_Id(Long ownerId);
+
+    // Batch-load hosts' pets for the walk/date feeds (avoids one query per feed card)
+    @Query("SELECT p FROM Pet p JOIN FETCH p.owner WHERE p.owner.id IN :ownerIds")
+    List<Pet> findWithOwnerByOwnerIdIn(@Param("ownerIds") List<Long> ownerIds);
+
+    @Query("SELECT p FROM Pet p JOIN FETCH p.owner WHERE p.id IN :ids")
+    List<Pet> findWithOwnerByIdIn(@Param("ids") List<Long> ids);
 }

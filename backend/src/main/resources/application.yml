@@ -5,21 +5,45 @@ server:
 management:
   endpoints:
     web:
+      # Only health/info are public. Prometheus/metrics expose internal timing and
+      # topology; enable them behind an override (env MGMT_ENDPOINTS) in trusted envs only.
       exposure:
-        include: health,info,prometheus,metrics
+        include: ${MGMT_ENDPOINTS:health,info}
   endpoint:
     prometheus:
-      enabled: true
+      enabled: ${MGMT_PROMETHEUS_ENABLED:false}
+
+app:
+  # HMAC secret for signing app JWTs. MUST be overridden via APP_JWT_SECRET in every
+  # non-local environment — the app refuses to start with the built-in dev value unless
+  # spring.profiles.active includes "dev" (see JwtService).
+  jwt:
+    secret: ${APP_JWT_SECRET:pawpal-dev-secret-change-in-production}
+    ttl-hours: ${APP_JWT_TTL_HOURS:168}
+  cors:
+    # Comma-separated allowed origins. Defaults to local Expo/emulator dev hosts; set
+    # APP_CORS_ALLOWED_ORIGINS to your web/app origin(s) in production.
+    allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:8081,http://localhost:19006,http://10.0.2.2:8081}
+  auth:
+    google:
+      # OAuth client id for POST /api/auth/google audience verification. Empty = accept
+      # any Google-issued ID token (dev only); set GOOGLE_CLIENT_ID before production.
+      client-id: ${GOOGLE_CLIENT_ID:}
+  kafka:
+    # Partition count for user-telemetry, declared by KafkaTopicConfig and reused as the
+    # telemetry listener's concurrency (1 consumer thread per partition is the ceiling).
+    telemetry-partitions: ${APP_KAFKA_TELEMETRY_PARTITIONS:3}
 
 spring:
   application:
     name: pet_social
 
-  # PostgreSQL Configuration
+  # PostgreSQL Configuration — credentials come from the environment; the defaults are
+  # for local dev only. Set DB_URL / DB_USERNAME / DB_PASSWORD in every real deployment.
   datasource:
-    url: jdbc:postgresql://localhost:5432/pet_social_db
-    username: admin
-    password: rootpassword
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/pet_social_db}
+    username: ${DB_USERNAME:admin}
+    password: ${DB_PASSWORD:rootpassword}
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: 20 # starting point; tune against the Sprint 4 load test

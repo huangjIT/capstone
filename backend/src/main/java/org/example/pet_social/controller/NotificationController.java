@@ -1,5 +1,6 @@
 package org.example.pet_social.controller;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.example.pet_social.dto.NotificationCreateRequest;
 import org.example.pet_social.dto.NotificationResponse;
@@ -8,6 +9,7 @@ import org.example.pet_social.entity.Notification;
 import org.example.pet_social.entity.User;
 import org.example.pet_social.repository.NotificationRepository;
 import org.example.pet_social.service.UserService;
+import org.example.pet_social.web.JwtAuthFilter;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
@@ -27,23 +29,28 @@ public class NotificationController {
         this.userService = userService;
     }
 
-    /** NotificationsScreen feed, newest first. */
+    /** NotificationsScreen feed, newest first. Scoped to the authenticated user. */
     @GetMapping
-    public List<NotificationResponse> list(@RequestParam Long userId) {
-        return notificationRepository.findByRecipient_IdOrderByCreatedAtDesc(userId).stream()
+    public List<NotificationResponse> list(HttpServletRequest request) {
+        return notificationRepository.findByRecipient_IdOrderByCreatedAtDesc(authUserId(request)).stream()
                 .map(this::toResponse)
                 .toList();
     }
 
     /** Badge count on the tab bar. */
     @GetMapping("/unread-count")
-    public Map<String, Long> unreadCount(@RequestParam Long userId) {
-        return Map.of("count", notificationRepository.countByRecipient_IdAndIsReadFalse(userId));
+    public Map<String, Long> unreadCount(HttpServletRequest request) {
+        return Map.of("count", notificationRepository.countByRecipient_IdAndIsReadFalse(authUserId(request)));
     }
 
     @PutMapping("/{id}/read")
-    public ResponseEntity<Void> markRead(@PathVariable Long id) {
+    public ResponseEntity<Void> markRead(@PathVariable Long id, HttpServletRequest request) {
+        Long userId = authUserId(request);
         return notificationRepository.findById(id).map(n -> {
+            // Only the recipient may mark their own notification read.
+            if (!userId.equals(n.getRecipientId())) {
+                return ResponseEntity.status(403).<Void>build();
+            }
             n.setIsRead(true);
             notificationRepository.save(n);
             return ResponseEntity.noContent().<Void>build();
@@ -52,22 +59,24 @@ public class NotificationController {
 
     @PutMapping("/read-all")
     @Transactional
-    public Map<String, Integer> markAllRead(@RequestParam Long userId) {
-        return Map.of("updated", notificationRepository.markAllRead(userId));
+    public Map<String, Integer> markAllRead(HttpServletRequest request) {
+        return Map.of("updated", notificationRepository.markAllRead(authUserId(request)));
     }
 
-    /** Used by other flows (blind-date requests, marketplace interest) to push feed items. */
+    /** Used by other flows (blind-date requests, marketplace interest) to push feed items.
+     *  The sender is always the authenticated caller — a client cannot spoof senderId. */
     @PostMapping
-    public ResponseEntity<NotificationResponse> create(@Valid @RequestBody NotificationCreateRequest req) {
+    public ResponseEntity<NotificationResponse> create(@Valid @RequestBody NotificationCreateRequest req,
+                                                       HttpServletRequest request) {
         User recipient = userService.getUserById(req.recipientId());
         if (recipient == null) {
             return ResponseEntity.badRequest().build();
         }
         Notification n = new Notification(recipient, req.category().toUpperCase(), req.preview());
-        if (req.senderId() != null) {
-            User sender = userService.getUserById(req.senderId());
+        User sender = userService.getUserById(authUserId(request));
+        if (sender != null) {
             n.setSender(sender);
-            n.setSenderName(sender != null ? sender.getName() : null);
+            n.setSenderName(sender.getName());
         }
         n.setPetName(req.petName());
         n.setPetEmoji(req.petEmoji());
@@ -75,6 +84,14 @@ public class NotificationController {
             n.setRelated(req.relatedType().toUpperCase(), req.relatedId());
         }
         return ResponseEntity.ok(toResponse(notificationRepository.save(n)));
+    }
+
+    private Long authUserId(HttpServletRequest request) {
+        Object attr = request.getAttribute(JwtAuthFilter.AUTH_USER_ID);
+        if (attr == null) {
+            throw new IllegalStateException("JwtAuthFilter did not run for this request");
+        }
+        return (Long) attr;
     }
 
     private NotificationResponse toResponse(Notification n) {

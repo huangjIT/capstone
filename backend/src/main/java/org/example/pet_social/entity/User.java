@@ -32,6 +32,16 @@ public class User {
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
+    // Profile fields shown on the Me tab of the mobile app (see /api/users/me)
+    @Column(length = 1000)
+    private String bio;
+
+    @Column
+    private String location;
+
+    @Column(name = "avatar_url")
+    private String avatarUrl;
+
     // Bitmask of walking-partner matching preferences (e.g. accepts large dogs, walks at night).
     // Consumed by MatchingService when filtering candidates.
     @Column(name = "match_preferences_mask")
@@ -71,6 +81,15 @@ public class User {
 
     public boolean isActive() { return isActive; }
     public void setActive(boolean active) { isActive = active; }
+
+    public String getBio() { return bio; }
+    public void setBio(String bio) { this.bio = bio; }
+
+    public String getLocation() { return location; }
+    public void setLocation(String location) { this.location = location; }
+
+    public String getAvatarUrl() { return avatarUrl; }
+    public void setAvatarUrl(String avatarUrl) { this.avatarUrl = avatarUrl; }
 
     public LocalDateTime getCreatedAt() { return createdAt; }
 }

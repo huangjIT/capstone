@@ -36,6 +36,26 @@ public class AuthService {
         return userRegistryService.registerUser(user);
     }
 
+    /**
+     * Google Sign-In: reuse the account matching the verified email, or create
+     * one (no password — such accounts can only sign in via Google until the
+     * user sets one). Fills avatarUrl from the Google picture if still empty.
+     */
+    public User findOrCreateGoogleUser(String email, String name, String pictureUrl) {
+        User existing = userService.getUserByEmail(email);
+        if (existing != null) {
+            if (existing.getAvatarUrl() == null && pictureUrl != null) {
+                existing.setAvatarUrl(pictureUrl);
+                userService.registerUser(existing);
+            }
+            return existing;
+        }
+        User user = new User(name, email, "PET_OWNER", true);
+        user.setAvatarUrl(pictureUrl);
+        user.setMatchPreferencesMask(0L);
+        return userRegistryService.registerUser(user);
+    }
+
     /** Returns the user on valid credentials, else null. */
     public User login(String email, String password) {
         User user = userService.getUserByEmail(email);

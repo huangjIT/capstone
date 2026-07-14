@@ -70,10 +70,12 @@ public class TelemetryConsumerService {
                 .register(meterRegistry);
     }
 
-    // Batch listener: with user-telemetry at 1 partition, only 1 thread will ever be assigned
-    // regardless of `concurrency`, so throughput comes from doing more work per Redis round-trip
-    // (one pipeline per batch) rather than more parallel threads.
-    @KafkaListener(topics = "user-telemetry", groupId = "user-group", concurrency = "1")
+    // Batch listener. Concurrency must not exceed the topic's partition count (extra threads
+    // sit idle — proven in the 2026-06-16 session when the topic had 1 auto-created partition).
+    // KafkaTopicConfig now declares user-telemetry with app.kafka.telemetry-partitions (default 3),
+    // so the same property drives both sides and they can't drift apart.
+    @KafkaListener(topics = "user-telemetry", groupId = "user-group",
+            concurrency = "${app.kafka.telemetry-partitions:3}")
     public void consumeTelemetryBatch(List<String> messages) {
         consumerThreadsSeen.add(Thread.currentThread().getName());
 
