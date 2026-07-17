@@ -8,12 +8,12 @@ import org.example.pet_social.entity.UserLocation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.geo.Point;
-import org.springframework.data.redis.core.GeoOperations;
 import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -31,7 +31,6 @@ public class TelemetryConsumerService {
 
     private final ObjectMapper objectMapper;
     private final StringRedisTemplate redisTemplate;
-    private final GeoOperations<String, String> geoOps;
     private final DashboardService dashboardService;
     private final Timer processingTimer;
     private final Timer deserializeTimer;
@@ -48,7 +47,6 @@ public class TelemetryConsumerService {
     public TelemetryConsumerService(ObjectMapper objectMapper, StringRedisTemplate redisTemplate, DashboardService dashboardService, MeterRegistry meterRegistry) {
         this.objectMapper = objectMapper;
         this.redisTemplate = redisTemplate;
-        this.geoOps = redisTemplate.opsForGeo();
         this.dashboardService = dashboardService;
         this.processingTimer = Timer.builder("telemetry.processing.duration")
                 .description("Time to write a telemetry record into the Redis geo index + metadata")
@@ -117,57 +115,38 @@ public class TelemetryConsumerService {
     }
 
     private void processTelemetryInternal(UserLocation loc) {
-        try {
-            String member = String.valueOf(loc.userId());
-            Point point = new Point(loc.longitude(), loc.latitude()); // Point(x=lon,y=lat)
-
-            String metaKey = META_PREFIX + member;
-            Map<String, String> meta = new HashMap<>();
-            meta.put("lastSeen", String.valueOf(Instant.now().toEpochMilli()));
-            meta.put("available", "true");
-
-            // Batch GEOADD + HSET + EXPIRE + INCR into a single round-trip instead of 4 separate ones.
-            pipelineInFlight.incrementAndGet();
-            try {
-                redisPipelineTimer.record(() -> redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
-                    geoOps.add(GEO_KEY, point, member);
-                    redisTemplate.opsForHash().putAll(metaKey, meta);
-                    redisTemplate.expire(metaKey, Duration.ofHours(6));
-                    redisTemplate.opsForValue().increment(DashboardService.TELEMETRY_COUNT_KEY);
-                    return null;
-                }));
-            } finally {
-                pipelineInFlight.decrementAndGet();
-            }
-
-            log.debug("Processed telemetry (direct) userId={} lat={} lon={}", loc.userId(), loc.latitude(), loc.longitude());
-
-            dashboardService.recordTelemetryProcessed();
-        } catch (Exception e) {
-            log.error("Failed to process telemetry loc: {}", loc, e);
-        }
+        processBatchInternal(List.of(loc));
     }
 
-    // One Redis pipeline for the whole Kafka batch instead of one per record - amortizes the
-    // round-trip cost across the batch, since a single partition caps us to one consumer thread anyway.
+    // One Redis pipeline for the whole Kafka batch - amortizes the round-trip cost across
+    // the batch. All commands MUST go through the callback's connection: template ops
+    // (geoOps.add, opsForHash, ...) inside executePipelined check out their OWN pooled
+    // connections, so nothing rode the pipeline and each command was a separate round trip
+    // (and the nested checkouts were the pool contention the in-flight gauge kept showing).
     private void processBatchInternal(List<UserLocation> locations) {
+        byte[] geoKey = bytes(GEO_KEY);
+        byte[] countKey = bytes(DashboardService.TELEMETRY_COUNT_KEY);
+        byte[] lastSeenField = bytes("lastSeen");
+        byte[] availableField = bytes("available");
+        byte[] trueValue = bytes("true");
         try {
             pipelineInFlight.incrementAndGet();
             try {
                 redisPipelineTimer.record(() -> redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
+                    byte[] now = bytes(String.valueOf(Instant.now().toEpochMilli()));
                     for (UserLocation loc : locations) {
                         String member = String.valueOf(loc.userId());
                         Point point = new Point(loc.longitude(), loc.latitude()); // Point(x=lon,y=lat)
-                        geoOps.add(GEO_KEY, point, member);
+                        connection.geoCommands().geoAdd(geoKey, point, bytes(member));
 
-                        String metaKey = META_PREFIX + member;
-                        Map<String, String> meta = new HashMap<>();
-                        meta.put("lastSeen", String.valueOf(Instant.now().toEpochMilli()));
-                        meta.put("available", "true");
-                        redisTemplate.opsForHash().putAll(metaKey, meta);
-                        redisTemplate.expire(metaKey, Duration.ofHours(6));
+                        byte[] metaKey = bytes(META_PREFIX + member);
+                        Map<byte[], byte[]> meta = new HashMap<>();
+                        meta.put(lastSeenField, now);
+                        meta.put(availableField, trueValue);
+                        connection.hashCommands().hMSet(metaKey, meta);
+                        connection.keyCommands().expire(metaKey, Duration.ofHours(6).toSeconds());
                     }
-                    redisTemplate.opsForValue().increment(DashboardService.TELEMETRY_COUNT_KEY, locations.size());
+                    connection.stringCommands().incrBy(countKey, locations.size());
                     return null;
                 }));
             } finally {
@@ -182,5 +161,9 @@ public class TelemetryConsumerService {
         } catch (Exception e) {
             log.error("Failed to process telemetry batch of size {}", locations.size(), e);
         }
+    }
+
+    private static byte[] bytes(String value) {
+        return value.getBytes(StandardCharsets.UTF_8);
     }
 }

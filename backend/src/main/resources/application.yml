@@ -1,6 +1,11 @@
 
 server:
   port: 8080
+  compression:
+    # Feed responses are verbose denormalized JSON read over mobile networks.
+    enabled: true
+    mime-types: application/json
+    min-response-size: 1024
 
 management:
   endpoints:
@@ -52,10 +57,15 @@ spring:
   jpa:
     hibernate:
       ddl-auto: update # Automatically updates DB schema based on your Java entities
-    show-sql: true # Prints SQL queries to the console for easy debugging
+    # Console SQL logging is synchronous and measurably caps throughput under load.
+    # Off by default; set SHOW_SQL=true when debugging queries locally.
+    show-sql: ${SHOW_SQL:false}
+    # Don't hold a DB connection for the whole request (Redis calls + JSON serialization
+    # included) — services fetch-join what they need up front.
+    open-in-view: false
     properties:
       hibernate:
-        format_sql: true
+        format_sql: ${SHOW_SQL:false}
         jdbc:
           batch_size: 50 # requires SEQUENCE-based ids (set on all entities) - IDENTITY disables batching
         order_inserts: true
@@ -80,8 +90,15 @@ spring:
     bootstrap-servers: localhost:9092
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      # MUST BE JSON
-      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      # Producers already serialize payloads to JSON strings themselves (ObjectMapper);
+      # JsonSerializer was re-serializing that string (quote+escape every byte). Plain
+      # StringSerializer removes the double serialization on both topics.
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      # Small batching window + compression: ~free throughput for telemetry bursts.
+      properties:
+        linger.ms: 5
+        batch.size: 32768
+        compression.type: lz4
     listener:
       # Single @KafkaListener in the app (TelemetryConsumerService) is written for batch mode -
       # with the user-telemetry topic at 1 partition, batching is how we maximize throughput
@@ -92,8 +109,6 @@ spring:
       auto-offset-reset: earliest
       max-poll-records: 1000
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      # MUST BE JSON
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
-      properties:
-        # Security requirement to allow JSON to convert into your DTOs
-        spring.json.trusted.packages: "*"
+      # Consumers parse JSON themselves (ObjectMapper.readValue) — mirror of the producer
+      # change above; also removes the trusted.packages="*" deserialization smell.
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer

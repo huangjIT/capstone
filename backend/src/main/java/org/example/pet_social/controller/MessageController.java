@@ -139,7 +139,9 @@ public class MessageController {
                 .findThread(userId, otherUserId, "LISTING", itemId).stream()
                 .map(m -> MessageResponse.from(m, userId))
                 .toList();
-        if (messageRepository.markContextRead(userId, "LISTING", itemId) > 0) {
+        // Polled endpoint — skip the read-marking UPDATE unless something is actually unread.
+        if (thread.stream().anyMatch(m -> !m.mine() && !m.read())
+                && messageRepository.markContextRead(userId, "LISTING", itemId) > 0) {
             unreadCountService.invalidate(userId);
         }
         return thread;
@@ -196,7 +198,10 @@ public class MessageController {
         List<MessageResponse> thread = messageRepository.findByContext(contextType, requestId).stream()
                 .map(m -> MessageResponse.from(m, userId))
                 .toList();
-        if (messageRepository.markContextRead(userId, contextType, requestId) > 0) {
+        // The app polls this endpoint; only issue the read-marking UPDATE when the fetched
+        // thread actually contains unread incoming messages, not once per poll.
+        if (thread.stream().anyMatch(m -> !m.mine() && !m.read())
+                && messageRepository.markContextRead(userId, contextType, requestId) > 0) {
             unreadCountService.invalidate(userId);
         }
         return ResponseEntity.ok(thread);
