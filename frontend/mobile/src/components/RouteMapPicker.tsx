@@ -74,7 +74,7 @@ interface LatLng {
 interface RouteMapPickerProps {
   visible: boolean;
   onClose: () => void;
-  onConfirm: (route: string) => void;
+  onConfirm: (route: string, startCoord: LatLng, endCoord: LatLng) => void;
 }
 
 const DEFAULT_REGION = {
@@ -89,11 +89,23 @@ async function reverseGeocode(coord: LatLng): Promise<string> {
     const results = await Location.reverseGeocodeAsync(coord);
     if (results.length > 0) {
       const r = results[0];
-      return [r.name, r.street, r.district, r.city]
+      const label = [r.name, r.street, r.district, r.city]
         .filter(Boolean)
         .slice(0, 2)
         .join(', ');
+      if (label) return label;
     }
+  } catch {}
+  // The platform Geocoder is unavailable on many Android emulators/devices
+  // without Play services geocoding — fall back to ORS (Pelias) over HTTP.
+  try {
+    const url = `https://api.openrouteservice.org/geocode/reverse?api_key=${ORS_API_KEY}&point.lon=${coord.longitude}&point.lat=${coord.latitude}&size=1`;
+    const res = await fetch(url);
+    const props = (await res.json()).features?.[0]?.properties;
+    const label = [props?.name, props?.locality ?? props?.county]
+      .filter(Boolean)
+      .join(', ');
+    if (label) return label;
   } catch {}
   return `${coord.latitude.toFixed(4)}, ${coord.longitude.toFixed(4)}`;
 }
@@ -150,8 +162,8 @@ export const RouteMapPicker: React.FC<RouteMapPickerProps> = ({ visible, onClose
   };
 
   const handleConfirm = () => {
-    if (!startLabel || !endLabel) return;
-    onConfirm(`${startLabel} → ${endLabel}`);
+    if (!startPin || !endPin || !startLabel || !endLabel) return;
+    onConfirm(`${startLabel} → ${endLabel}`, startPin, endPin);
     handleReset();
   };
 

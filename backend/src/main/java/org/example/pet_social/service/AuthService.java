@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
+import java.util.Locale;
 
 /**
  * Registration/login with BCrypt hashing. Accounts created before 2026-07-02
@@ -25,8 +26,9 @@ public class AuthService {
         this.userRegistryService = userRegistryService;
     }
 
-    /** Returns the created user, or null if the email is already taken. */
+    /** Returns the created user, or null if the email is already taken (any casing). */
     public User register(String name, String email, String password, String role, boolean active, Long matchPreferencesMask) {
+        email = normalizeEmail(email);
         if (userService.getUserByEmail(email) != null) {
             return null;
         }
@@ -42,6 +44,7 @@ public class AuthService {
      * user sets one). Fills avatarUrl from the Google picture if still empty.
      */
     public User findOrCreateGoogleUser(String email, String name, String pictureUrl) {
+        email = normalizeEmail(email);
         User existing = userService.getUserByEmail(email);
         if (existing != null) {
             if (existing.getAvatarUrl() == null && pictureUrl != null) {
@@ -73,6 +76,11 @@ public class AuthService {
             return user;
         }
         return null;
+    }
+
+    /** Emails are matched and stored case-insensitively (lowercased on write). */
+    private String normalizeEmail(String email) {
+        return email == null ? null : email.trim().toLowerCase(Locale.ROOT);
     }
 
     private String sha256Hex(String password) {

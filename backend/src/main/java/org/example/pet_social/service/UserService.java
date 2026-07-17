@@ -4,6 +4,8 @@ import org.example.pet_social.entity.User;
 import org.example.pet_social.repository.UserRepository;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+
 @Service
 public class UserService {
 
@@ -23,8 +25,18 @@ public class UserService {
         return userRepository.findById(id).orElse(null);
     }
 
+    /**
+     * Email lookup is case-insensitive: gmail treats Sanjyot@ and sanjyot@ as the
+     * same inbox, and case-sensitive matching let one person register twice. If
+     * legacy case-variant duplicate rows exist, the oldest account wins so people
+     * keep the account they created first.
+     */
     public User getUserByEmail(String email) {
-        return userRepository.findByEmail(email).orElse(null);
+        if (email == null || email.isBlank()) {
+            return null;
+        }
+        List<User> matches = userRepository.findByEmailIgnoreCaseOrderByIdAsc(email.trim());
+        return matches.isEmpty() ? null : matches.get(0);
     }
 }
 
