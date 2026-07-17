@@ -9,6 +9,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
 import java.util.stream.Collectors;
@@ -42,6 +43,17 @@ public class GlobalExceptionHandler {
                 .sorted()
                 .collect(Collectors.joining("; "));
         return respond(HttpStatus.BAD_REQUEST, new IllegalArgumentException(message), request);
+    }
+
+    /**
+     * Services throw ResponseStatusException with a deliberate status (400/403/404);
+     * without this handler they fall into the catch-all and surface as 500s.
+     */
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<ErrorResponse> handleResponseStatus(ResponseStatusException ex, HttpServletRequest request) {
+        HttpStatus status = HttpStatus.resolve(ex.getStatusCode().value());
+        return respond(status == null ? HttpStatus.INTERNAL_SERVER_ERROR : status,
+                new Exception(ex.getReason() == null ? ex.getMessage() : ex.getReason()), request);
     }
 
     @ExceptionHandler(Exception.class)
