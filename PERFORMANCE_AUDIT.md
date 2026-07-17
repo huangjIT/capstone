@@ -2,6 +2,36 @@
 
 **Date:** 2026-07-13 · **Branch:** `feature/sanjyot-db-schema` · Measured on the actual repo/working tree, not guessed.
 
+---
+
+## Update 2026-07-17 — fixes applied + one new finding
+
+**New finding (worse than anything below): the telemetry "pipeline" never pipelined.**
+`TelemetryConsumerService` called *template* operations (`geoOps.add`, `opsForHash().putAll`, `expire`, `increment`) **inside** `executePipelined()`. Spring Data Redis template ops check out their own pooled connections — nothing rode the pipelined connection, so a 1000-record Kafka batch issued ~3000 sequential round trips on nested connections while the "pipeline" connection sat idle. That nested checkout is exactly the pool contention the service's own `telemetry.redis.pipeline.inflight` gauge kept showing, and why `lettuce.pool.max-active` had to be raised to 16. **Fixed:** both paths now issue `geoAdd`/`hMSet`/`expire`/`incrBy` directly on the callback's `connection` — one real round trip per Kafka batch.
+
+**Applied from the "do now / next sprint" lists (all verified live against the running stack):**
+1. `show-sql`/`format_sql` off by default (`SHOW_SQL=true` to re-enable) · `spring.jpa.open-in-view: false` · `server.compression.enabled: true` (§3.1).
+2. Kafka double JSON serialization removed — plain `StringSerializer`/`StringDeserializer` on both topics (producers/consumers already do their own Jackson); `spring.json.trusted.packages: "*"` gone; producer now batches (`linger.ms: 5`, `batch.size: 32768`, `compression.type: lz4`) (§3.3). End-to-end verified: POST /api/telemetry/location → Kafka → Redis `users:geo`.
+3. Chat polling 1 s → 4 s in `WalkRequestDetailScreen` + `MarketplaceChatScreen` (§4.1) — a 75 % cut in chat request volume per open screen.
+4. `markContextRead` UPDATE now only runs when the fetched thread actually contains unread incoming messages, instead of once per poll (§3.2).
+5. `expo-dev-client` moved to devDependencies (§4.2).
+6. The app now **feeds the telemetry pipeline for real**: a `useTelemetryPing` hook posts the signed-in user's position on login and every 3 min while the app is open — `users:geo` no longer depends on the demo generator.
+7. First real unit tests: `AuthServiceTest` (case-insensitive email, BCrypt, legacy SHA-256 upgrade), `UserServiceTest`, `GlobalExceptionHandlerTest` — 13 tests, no Spring context for the new ones.
+
+**Still open, with alternatives (unchanged recommendations):**
+| Item | Cheapest | Better | Best |
+|---|---|---|---|
+| Chat delivery | 4 s poll (done) | poll with `?sinceId=` cursor | WebSocket/SSE push |
+| Feed refetch on every tab focus | keep | stale-while-revalidate cache (React Query) | + ETag/`If-None-Match` |
+| No pagination on lists | `?limit=` cap on feeds/notifications | `Pageable` everywhere | cursor pagination on messages |
+| `PetQueryService` N+1s | leave (endpoints unused by app) | batch `IN` query + pipelined GEOPOS | delete with frontend1 retirement |
+| `firebase` full web SDK in bundle | keep | REST upload straight to Storage | `@react-native-firebase/storage` |
+| `ddl-auto: update` | keep for dev | Flyway baseline | Flyway + CI migration check |
+| 5 always-on containers | stop Grafana/Prometheus when unused | compose `--profile monitoring` | plain `redis:7-alpine` instead of redis-stack |
+| Cold start always lands on Login | keep | auto-login when a stored JWT exists (new gap found 07-17) | + refresh token rotation |
+
+---
+
 TL;DR: the *app* is not intrinsically heavy — the repo carries ~2.2 GB of dead weight from a
 legacy frontend, the backend ships debug-grade config (SQL console logging, no pagination,
 N+1 queries in the legacy discovery endpoints), and the mobile app polls two chat endpoints
