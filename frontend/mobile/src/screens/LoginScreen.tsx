@@ -12,8 +12,17 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 import { COLORS } from '../constants/colors';
-import { apiPost, saveToken } from '../utils/api';
+import { apiPost, saveToken, saveUserId } from '../utils/api';
+
+// ── Google OAuth ─────────────────────────────────────────────────────────────
+// Web Client ID is required by GoogleSignin to obtain an ID token on Android.
+// Google Console → OAuth 2.0 Client ID → Web application
+const GOOGLE_WEB_CLIENT_ID = '279020382757-qpht0e5cnq7ne1liof6sk0h8ptt4vkuj.apps.googleusercontent.com';
+
+GoogleSignin.configure({ webClientId: GOOGLE_WEB_CLIENT_ID });
+// ────────────────────────────────────────────────────────────────────────────
 
 interface LoginScreenProps {
   navigation: any;
@@ -32,6 +41,26 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+
+  const handleGoogleSignIn = async () => {
+    try {
+      setGoogleLoading(true);
+      await GoogleSignin.hasPlayServices();
+      const userInfo = await GoogleSignin.signIn();
+      const idToken = userInfo.data?.idToken;
+      if (!idToken) throw new Error('No ID token returned from Google');
+      const res = await apiPost<AuthResponse>('/api/auth/google', { idToken });
+      await saveToken(res.token);
+      await saveUserId(res.userId);
+      navigation.reset({ index: 0, routes: [{ name: 'Tabs' }] });
+    } catch (e: any) {
+      if (e.code === statusCodes.SIGN_IN_CANCELLED) return;
+      Alert.alert('Google Sign In Failed', e.message || 'Something went wrong');
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
 
   const handleSignIn = async () => {
     if (!email || !password) {
@@ -42,17 +71,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
       setLoading(true);
       const res = await apiPost<AuthResponse>('/api/auth/login', { email, password });
       await saveToken(res.token);
+      await saveUserId(res.userId);
       navigation.reset({ index: 0, routes: [{ name: 'Tabs' }] });
     } catch (e: any) {
       Alert.alert('Login Failed', e.message || 'Invalid email or password');
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleGoogleSignIn = () => {
-    // Google OAuth — to be implemented with backend OAuth flow
-    Alert.alert('Coming Soon', 'Google login will be available soon');
   };
 
   return (
@@ -81,8 +106,17 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
         {/* Card */}
         <View style={styles.card}>
           {/* Google Button */}
-          <TouchableOpacity style={styles.googleBtn} onPress={handleGoogleSignIn} activeOpacity={0.8}>
-            <Text style={styles.googleG}>G</Text>
+          <TouchableOpacity
+            style={[styles.googleBtn, googleLoading && styles.btnDisabled]}
+            onPress={handleGoogleSignIn}
+            activeOpacity={0.8}
+            disabled={googleLoading}
+          >
+            {googleLoading ? (
+              <ActivityIndicator color={COLORS.text} style={{ marginRight: 12 }} />
+            ) : (
+              <Text style={styles.googleG}>G</Text>
+            )}
             <Text style={styles.googleBtnText}>Continue with Google</Text>
           </TouchableOpacity>
 
@@ -148,207 +182,75 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: COLORS.bg,
-  },
-  container: {
-    flexGrow: 1,
-    alignItems: 'center',
-    paddingHorizontal: 20,
-  },
+  root: { flex: 1, backgroundColor: COLORS.bg },
+  container: { flexGrow: 1, alignItems: 'center', paddingHorizontal: 20 },
 
-  // Decorative blobs
   blobOrange: {
-    position: 'absolute',
-    width: 480,
-    height: 480,
-    borderRadius: 240,
-    backgroundColor: COLORS.primary,
-    opacity: 0.1,
-    top: -120,
-    left: -80,
+    position: 'absolute', width: 480, height: 480, borderRadius: 240,
+    backgroundColor: COLORS.primary, opacity: 0.1, top: -120, left: -80,
   },
   blobPurple: {
-    position: 'absolute',
-    width: 280,
-    height: 280,
-    borderRadius: 140,
-    backgroundColor: COLORS.purple,
-    opacity: 0.08,
-    bottom: 60,
-    right: -60,
+    position: 'absolute', width: 280, height: 280, borderRadius: 140,
+    backgroundColor: COLORS.purple, opacity: 0.08, bottom: 60, right: -60,
   },
 
-  // Logo area
-  logoWrap: {
-    alignItems: 'center',
-    marginBottom: 28,
-  },
+  logoWrap: { alignItems: 'center', marginBottom: 28 },
   logoBg: {
-    width: 100,
-    height: 100,
-    borderRadius: 28,
-    backgroundColor: COLORS.card,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-    shadowColor: COLORS.primary,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.18,
-    shadowRadius: 20,
-    elevation: 6,
+    width: 100, height: 100, borderRadius: 28, backgroundColor: COLORS.card,
+    alignItems: 'center', justifyContent: 'center', marginBottom: 16,
+    shadowColor: COLORS.primary, shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.18, shadowRadius: 20, elevation: 6,
   },
-  logoPaw: {
-    fontSize: 46,
-  },
-  appName: {
-    fontSize: 32,
-    fontWeight: '800',
-    color: COLORS.primary,
-    marginBottom: 4,
-  },
-  welcomeText: {
-    fontSize: 16,
-    color: COLORS.textSub,
-  },
+  logoPaw: { fontSize: 46 },
+  appName: { fontSize: 32, fontWeight: '800', color: COLORS.primary, marginBottom: 4 },
+  welcomeText: { fontSize: 16, color: COLORS.textSub },
 
-  // Card
   card: {
-    width: '100%',
-    backgroundColor: COLORS.card,
-    borderRadius: 24,
-    padding: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.06,
-    shadowRadius: 20,
-    elevation: 4,
+    width: '100%', backgroundColor: COLORS.card, borderRadius: 24, padding: 24,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06, shadowRadius: 20, elevation: 4,
   },
 
-  // Google button
   googleBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.bg,
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    marginBottom: 20,
+    flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.bg,
+    borderRadius: 14, paddingHorizontal: 16, paddingVertical: 14,
+    borderWidth: 1, borderColor: COLORS.border, marginBottom: 20,
   },
+  btnDisabled: { opacity: 0.6 },
   googleG: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#4285F4',
-    marginRight: 12,
-    width: 22,
-    textAlign: 'center',
+    fontSize: 18, fontWeight: '700', color: '#4285F4',
+    marginRight: 12, width: 22, textAlign: 'center',
   },
-  googleBtnText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: COLORS.text,
-  },
+  googleBtnText: { fontSize: 15, fontWeight: '600', color: COLORS.text },
 
-  // Divider
-  dividerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-    gap: 10,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: COLORS.border,
-  },
-  dividerText: {
-    fontSize: 13,
-    color: COLORS.textMuted,
-  },
+  dividerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 20, gap: 10 },
+  dividerLine: { flex: 1, height: 1, backgroundColor: COLORS.border },
+  dividerText: { fontSize: 13, color: COLORS.textMuted },
 
-  // Fields
-  fieldLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: COLORS.textSub,
-    marginBottom: 8,
-  },
+  fieldLabel: { fontSize: 12, fontWeight: '600', color: COLORS.textSub, marginBottom: 8 },
   input: {
-    backgroundColor: COLORS.bg,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    paddingHorizontal: 16,
-    paddingVertical: 13,
-    fontSize: 15,
-    color: COLORS.text,
-    marginBottom: 16,
+    backgroundColor: COLORS.bg, borderRadius: 14, borderWidth: 1, borderColor: COLORS.border,
+    paddingHorizontal: 16, paddingVertical: 13, fontSize: 15, color: COLORS.text, marginBottom: 16,
   },
   passwordWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.bg,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    marginBottom: 8,
+    flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.bg,
+    borderRadius: 14, borderWidth: 1, borderColor: COLORS.border, marginBottom: 8,
   },
-  passwordInput: {
-    flex: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 13,
-    fontSize: 15,
-    color: COLORS.text,
-  },
-  eyeBtn: {
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-  },
-  eyeIcon: {
-    fontSize: 18,
-  },
+  passwordInput: { flex: 1, paddingHorizontal: 16, paddingVertical: 13, fontSize: 15, color: COLORS.text },
+  eyeBtn: { paddingHorizontal: 14, paddingVertical: 13 },
+  eyeIcon: { fontSize: 18 },
 
-  // Forgot
-  forgotWrap: {
-    alignSelf: 'flex-end',
-    marginBottom: 24,
-    marginTop: 4,
-  },
-  forgotText: {
-    fontSize: 13,
-    color: COLORS.primary,
-  },
+  forgotWrap: { alignSelf: 'flex-end', marginBottom: 24, marginTop: 4 },
+  forgotText: { fontSize: 13, color: COLORS.primary },
 
-  // Sign In button
   signInBtn: {
-    backgroundColor: COLORS.primary,
-    borderRadius: 100,
-    paddingVertical: 16,
-    alignItems: 'center',
-    shadowColor: COLORS.primary,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.35,
-    shadowRadius: 14,
-    elevation: 5,
+    backgroundColor: COLORS.primary, borderRadius: 100, paddingVertical: 16, alignItems: 'center',
+    shadowColor: COLORS.primary, shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35, shadowRadius: 14, elevation: 5,
   },
-  signInText: {
-    color: '#fff',
-    fontSize: 17,
-    fontWeight: '700',
-  },
-  signUpWrap: {
-    marginTop: 16,
-    alignItems: 'center',
-  },
-  signUpText: {
-    fontSize: 14,
-    color: COLORS.textSub,
-  },
-  signUpLink: {
-    color: COLORS.primary,
-    fontWeight: '700',
-  },
+  signInText: { color: '#fff', fontSize: 17, fontWeight: '700' },
+
+  signUpWrap: { marginTop: 16, alignItems: 'center' },
+  signUpText: { fontSize: 14, color: COLORS.textSub },
+  signUpLink: { color: COLORS.primary, fontWeight: '700' },
 });

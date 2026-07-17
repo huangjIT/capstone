@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,13 +6,16 @@ import {
   ScrollView,
   TouchableOpacity,
   Platform,
+  Image,
 } from 'react-native';
 import MapView, { Marker, PROVIDER_GOOGLE, PROVIDER_DEFAULT } from 'react-native-maps';
 import type { MapView as MapViewType } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { COLORS } from '../constants/colors';
-import { nearbyPets } from '../constants/mockData';
+import { apiGet } from '../utils/api';
+import type { WalkFeedItem } from './FindPartnersScreen';
 
 const DEFAULT_REGION = {
   latitude: 37.7749,
@@ -21,9 +24,53 @@ const DEFAULT_REGION = {
   longitudeDelta: 0.02,
 };
 
+type MapFeedItem = WalkFeedItem & { latitude?: number; longitude?: number };
+
+/**
+ * Marker showing the poster's avatar. Keeps tracksViewChanges enabled until the
+ * remote image has loaded, so the marker stays rendered through zoom/pan
+ * re-rasterization instead of showing a blank circle.
+ */
+const PosterMarker: React.FC<{
+  item: MapFeedItem;
+  onCalloutPress: () => void;
+}> = ({ item, onCalloutPress }) => {
+  const [tracking, setTracking] = useState(true);
+
+  return (
+    <Marker
+      coordinate={{ latitude: item.latitude!, longitude: item.longitude! }}
+      title={item.ownerName || item.petName}
+      description={`${item.route || ''} · ${item.date || ''} ${item.time || ''}`}
+      tracksViewChanges={tracking}
+      onCalloutPress={onCalloutPress}
+    >
+      <View style={styles.markerWrap}>
+        <View style={styles.markerContainer}>
+          {item.ownerAvatarUrl ? (
+            <Image
+              source={{ uri: item.ownerAvatarUrl }}
+              style={styles.markerPhoto}
+              onLoad={() => setTimeout(() => setTracking(false), 100)}
+            />
+          ) : (
+            <Text style={styles.markerInitial}>
+              {item.ownerName?.[0]?.toUpperCase() ?? (item.petSpecies === 'CAT' ? '🐈' : '🐕')}
+            </Text>
+          )}
+        </View>
+        {/* Small pet badge on the avatar */}
+        <View style={styles.markerPetBadge}>
+          <Text style={styles.markerPetBadgeText}>{item.petSpecies === 'CAT' ? '🐈' : '🐕'}</Text>
+        </View>
+      </View>
+    </Marker>
+  );
+};
+
 export const HomeMapScreen: React.FC<{ navigation?: any }> = ({ navigation }) => {
   const insets = useSafeAreaInsets();
-  const [region, setRegion] = useState(DEFAULT_REGION);
+  const [feed, setFeed] = useState<MapFeedItem[]>([]);
   const mapRef = useRef<MapViewType>(null);
 
   const handleLocateMe = async () => {
@@ -36,23 +83,49 @@ export const HomeMapScreen: React.FC<{ navigation?: any }> = ({ navigation }) =>
     );
   };
 
+  const loadFeed = useCallback(async () => {
+    try {
+      let feedPath = '/api/walk/invitations/feed';
+      try {
+        const { status } = await Location.getForegroundPermissionsAsync();
+        if (status === 'granted') {
+          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          feedPath += `?lat=${loc.coords.latitude}&lng=${loc.coords.longitude}`;
+        }
+      } catch (_) {}
+      const items = await apiGet<MapFeedItem[]>(feedPath);
+      setFeed(items);
+    } catch (_) {}
+  }, []);
+
+  useFocusEffect(useCallback(() => { loadFeed(); }, [loadFeed]));
+
   useEffect(() => {
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') return;
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       const coords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
-      setRegion({ ...coords, latitudeDelta: 0.02, longitudeDelta: 0.02 });
       mapRef.current?.animateCamera({ center: coords, zoom: 15 }, { duration: 800 });
     })();
   }, []);
+
+  const markers = feed.filter(item => item.latitude != null && item.longitude != null);
+
+  const focusItem = (item: MapFeedItem) => {
+    if (item.latitude == null || item.longitude == null) return;
+    mapRef.current?.animateCamera(
+      { center: { latitude: item.latitude, longitude: item.longitude }, zoom: 15 },
+      { duration: 500 }
+    );
+  };
 
   return (
     <View style={styles.container}>
       <MapView
         ref={mapRef}
         style={styles.map}
-        region={region}
+        initialRegion={DEFAULT_REGION}
         provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : PROVIDER_DEFAULT}
         showsUserLocation
         showsMyLocationButton={false}
@@ -62,17 +135,17 @@ export const HomeMapScreen: React.FC<{ navigation?: any }> = ({ navigation }) =>
         pitchEnabled={false}
         rotateEnabled={false}
       >
-        {nearbyPets.map((pet) => (
-          <Marker
-            key={pet.id}
-            coordinate={{ latitude: pet.latitude, longitude: pet.longitude }}
-            title={pet.name}
-            description={pet.breed}
-          >
-            <View style={styles.markerContainer}>
-              <Text style={styles.markerEmoji}>{pet.emoji}</Text>
-            </View>
-          </Marker>
+        {markers.map((item) => (
+          <PosterMarker
+            key={item.id}
+            item={item}
+            onCalloutPress={() =>
+              navigation?.navigate('Walk', {
+                screen: 'ConnectPetProfile',
+                params: { feedItem: item },
+              })
+            }
+          />
         ))}
       </MapView>
 
@@ -81,17 +154,6 @@ export const HomeMapScreen: React.FC<{ navigation?: any }> = ({ navigation }) =>
         <View style={styles.logoChip}>
           <Text style={styles.logoPaw}>🐾</Text>
           <Text style={styles.logoText}>PawPal</Text>
-        </View>
-        <View style={styles.headerRight}>
-          <TouchableOpacity style={styles.floatingBtn}>
-            <Text style={styles.notifEmoji}>🔔</Text>
-            <View style={styles.notifBadge}>
-              <Text style={styles.notifBadgeText}>3</Text>
-            </View>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.floatingBtn}>
-            <Text style={styles.avatarEmoji}>👤</Text>
-          </TouchableOpacity>
         </View>
       </View>
 
@@ -127,7 +189,7 @@ export const HomeMapScreen: React.FC<{ navigation?: any }> = ({ navigation }) =>
         <View style={styles.sheetHeader}>
           <View>
             <Text style={styles.sectionTitle}>Nearby Walking Partners</Text>
-            <Text style={styles.nearbyCount}>🐾 {nearbyPets.length} pets nearby</Text>
+            <Text style={styles.nearbyCount}>🐾 {feed.length} pets nearby</Text>
           </View>
           <TouchableOpacity
             style={styles.seeAllBtn}
@@ -136,22 +198,39 @@ export const HomeMapScreen: React.FC<{ navigation?: any }> = ({ navigation }) =>
             <Text style={styles.seeAllText}>See all</Text>
           </TouchableOpacity>
         </View>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.petCardsScroll}
-        >
-          {nearbyPets.map((pet) => (
-            <TouchableOpacity key={pet.id} style={styles.petMiniCard} activeOpacity={0.85}>
-              <View style={styles.petMiniAvatar}>
-                <Text style={styles.petMiniEmoji}>{pet.emoji}</Text>
-              </View>
-              <Text style={styles.petMiniName}>{pet.name}</Text>
-              <Text style={styles.petMiniBreed} numberOfLines={1}>{pet.breed}</Text>
-              <Text style={styles.petMiniOwner}>{pet.owner}</Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+        {feed.length === 0 ? (
+          <View style={styles.emptyRow}>
+            <Text style={styles.emptyText}>No walk partners nearby yet.</Text>
+          </View>
+        ) : (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.petCardsScroll}
+          >
+            {feed.map((item) => (
+              <TouchableOpacity
+                key={item.id}
+                style={styles.petMiniCard}
+                activeOpacity={0.85}
+                onPress={() => focusItem(item)}
+              >
+                <View style={styles.petMiniAvatar}>
+                  {item.petProfilePhotoUrl ? (
+                    <Image source={{ uri: item.petProfilePhotoUrl }} style={styles.petMiniPhoto} />
+                  ) : (
+                    <Text style={styles.petMiniEmoji}>{item.petSpecies === 'CAT' ? '🐈' : '🐕'}</Text>
+                  )}
+                </View>
+                <Text style={styles.petMiniName} numberOfLines={1}>{item.petName || item.ownerName}</Text>
+                <Text style={styles.petMiniBreed} numberOfLines={1}>{item.petBreed || item.route || ''}</Text>
+                <Text style={styles.petMiniOwner} numberOfLines={1}>
+                  {item.distanceLabel ? `📍 ${item.distanceLabel}` : item.ownerName}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
       </View>
     </View>
   );
@@ -163,6 +242,12 @@ const styles = StyleSheet.create({
   },
   map: {
     ...StyleSheet.absoluteFill,
+  },
+  markerWrap: {
+    width: 50,
+    height: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   markerContainer: {
     width: 44,
@@ -178,9 +263,36 @@ const styles = StyleSheet.create({
     elevation: 4,
     borderWidth: 2,
     borderColor: COLORS.primaryBorder,
+    overflow: 'hidden',
+  },
+  markerPhoto: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
   },
   markerEmoji: {
     fontSize: 22,
+  },
+  markerInitial: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: COLORS.primary,
+  },
+  markerPetBadge: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: COLORS.primaryBorder,
+  },
+  markerPetBadgeText: {
+    fontSize: 10,
   },
   locateBtn: {
     position: 'absolute',
@@ -261,47 +373,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: COLORS.primary,
   },
-  headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  floatingBtn: {
-    position: 'relative',
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: 'rgba(255,255,255,0.92)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  notifEmoji: {
-    fontSize: 20,
-  },
-  notifBadge: {
-    position: 'absolute',
-    top: 5,
-    right: 5,
-    width: 15,
-    height: 15,
-    borderRadius: 8,
-    backgroundColor: COLORS.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  notifBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 9,
-    fontWeight: '700',
-  },
-  avatarEmoji: {
-    fontSize: 20,
-  },
   bottomSheet: {
     position: 'absolute',
     bottom: 0,
@@ -353,6 +424,14 @@ const styles = StyleSheet.create({
     color: COLORS.primary,
     fontWeight: '600',
   },
+  emptyRow: {
+    alignItems: 'center',
+    paddingVertical: 24,
+  },
+  emptyText: {
+    fontSize: 13,
+    color: COLORS.textMuted,
+  },
   petCardsScroll: {
     paddingHorizontal: 16,
     gap: 12,
@@ -375,6 +454,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 6,
+    overflow: 'hidden',
+  },
+  petMiniPhoto: {
+    width: 48,
+    height: 48,
   },
   petMiniEmoji: {
     fontSize: 24,

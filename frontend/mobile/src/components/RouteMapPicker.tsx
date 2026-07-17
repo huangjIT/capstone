@@ -273,6 +273,7 @@ export const RouteMapPicker: React.FC<RouteMapPickerProps> = ({ visible, onClose
           provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : PROVIDER_DEFAULT}
           initialRegion={DEFAULT_REGION}
           onPress={handleMapPress}
+          onPoiClick={handleMapPress}
           showsUserLocation
           zoomEnabled
           zoomTapEnabled

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,29 +7,134 @@ import {
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
+  Image,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/colors';
 import { ChatBubble } from '../components/ChatBubble';
 import { ChatInputBar } from '../components/ChatInputBar';
+import { apiGet, apiPost, apiPut } from '../utils/api';
+import type { WalkNotification } from './NotificationsScreen';
 
 interface WalkRequestDetailScreenProps {
   navigation: any;
   route: any;
 }
 
-const CHAT_MESSAGES = [
-  { id: '1', message: "Hi! I saw your walk invitation for Riverside Park. Max would love to join! He's super friendly with other dogs 🐕", isOwn: false, time: '9:12 AM', avatar: '👩' },
-  { id: '2', message: "That sounds great! Buddy loves making new friends. What time works best for you? We're flexible on the start time.", isOwn: true, time: '9:15 AM' },
-  { id: '3', message: "We could do 9am? Max is usually very energetic in the mornings and loves the trail by the river!", isOwn: false, time: '9:17 AM', avatar: '👩' },
-];
+interface ChatMessage {
+  id: string;
+  senderId: string;
+  receiverId: string;
+  content: string;
+  createdAt: string;
+  isOwn: boolean;
+  senderName?: string;
+  senderAvatarUrl?: string;
+}
+
+function formatTime(iso: string): string {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  } catch {
+    return '';
+  }
+}
 
 export const WalkRequestDetailScreen: React.FC<WalkRequestDetailScreenProps> = ({
   navigation,
   route,
 }) => {
   const insets = useSafeAreaInsets();
-  const [expanded, setExpanded] = useState(route?.params?.expanded ?? false);
+  const notif: WalkNotification | undefined = route?.params?.notif;
+  const requestId = notif?.id;
+  const isDate = notif?.type === 'date_request';
+
+  const isSent = notif?.direction === 'sent';
+  const otherUserId = isSent ? notif?.hostUserId : notif?.requesterUserId;
+  const otherName = isSent ? notif?.hostName : notif?.requesterName;
+  const otherAvatarUrl = isSent ? notif?.hostAvatarUrl : notif?.requesterAvatarUrl;
+
+  const [expanded, setExpanded] = useState(true);
+  const [localStatus, setLocalStatus] = useState(notif?.status ?? 'PENDING');
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const scrollRef = useRef<ScrollView>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetchMessages = useCallback(async () => {
+    if (!requestId) return;
+    try {
+      const data = await apiGet<ChatMessage[]>(
+        `/api/messages/${isDate ? 'date-request' : 'walk-request'}/${requestId}`
+      );
+      setMessages(data);
+    } catch (_) {}
+  }, [requestId, isDate]);
+
+  // Poll every 1 second
+  useEffect(() => {
+    fetchMessages();
+    // 4s keeps the chat feeling live without hammering the thread endpoint every second.
+    intervalRef.current = setInterval(fetchMessages, 4000);
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [fetchMessages]);
+
+  // Auto-scroll to bottom when messages update
+  useEffect(() => {
+    if (messages.length > 0) {
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+    }
+  }, [messages.length]);
+
+  const handleSend = useCallback(async (text: string) => {
+    if (!otherUserId || !requestId || !text.trim()) return;
+    try {
+      const sent = await apiPost<ChatMessage>('/api/messages', {
+        receiverId: otherUserId,
+        content: text.trim(),
+        ...(isDate ? { dateRequestId: requestId } : { walkRequestId: requestId }),
+      });
+      setMessages(prev => [...prev, sent]);
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Failed to send message');
+    }
+  }, [otherUserId]);
+
+  const handleAction = async (status: 'ACCEPTED' | 'REJECTED' | 'BLOCKED') => {
+    if (!notif?.id) return;
+    try {
+      await apiPut(`/api/${isDate ? 'date' : 'walk'}/requests/${notif.id}`, { status });
+      setLocalStatus(status);
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Failed to update request');
+    }
+  };
+
+  const handleBlock = () => {
+    Alert.alert('Block this user?', 'They will not be able to message you and the conversation will be closed.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Block', style: 'destructive', onPress: () => handleAction('BLOCKED') },
+    ]);
+  };
+
+  const isChatClosed = localStatus === 'REJECTED' || localStatus === 'BLOCKED';
+
+  const speciesEmoji = notif?.requesterPetSpecies === 'CAT' ? '🐈' : '🐕';
+  const tags: string[] = [];
+  if (!isSent) {
+    if (notif?.requesterPetIsVaccinated) tags.push('Vaccinated');
+    if (notif?.requesterPetIsNeutered) tags.push('Neutered');
+  }
+
+  const durationLabel = notif?.invitationDurationMinutes
+    ? notif.invitationDurationMinutes >= 60
+      ? `~${Math.round(notif.invitationDurationMinutes / 60)} hour${notif.invitationDurationMinutes >= 120 ? 's' : ''}`
+      : `${notif.invitationDurationMinutes} min`
+    : null;
 
   return (
     <KeyboardAvoidingView
@@ -41,123 +146,189 @@ export const WalkRequestDetailScreen: React.FC<WalkRequestDetailScreenProps> = (
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Text style={styles.backText}>←</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Walk Request</Text>
-        <View style={styles.backBtn} />
+        <Text style={styles.headerTitle}>{isDate ? 'Date Request' : 'Walk Request'}</Text>
+        <View style={[styles.walkChip, isDate && styles.dateChip]}>
+          <Text style={[styles.walkChipText, isDate && styles.dateChipText]}>
+            {isDate ? '💕 Date' : '🚶 Walk'}
+          </Text>
+        </View>
       </View>
 
+      {/* Requester / Host Card — fixed at top */}
+      <View style={styles.requesterCard}>
+        <View style={styles.requesterTop}>
+          <View style={styles.avatarOuter}>
+            <View style={styles.avatarWrap}>
+              {otherAvatarUrl ? (
+                <Image source={{ uri: otherAvatarUrl }} style={styles.avatarImg} />
+              ) : (
+                <View style={styles.avatarFallback}>
+                  <Text style={styles.avatarFallbackText}>
+                    {otherName?.[0]?.toUpperCase() ?? '?'}
+                  </Text>
+                </View>
+              )}
+            </View>
+            <View style={styles.onlineDot} />
+          </View>
+
+          <View style={styles.requesterInfo}>
+            <Text style={styles.requesterName}>{otherName || 'Unknown'}</Text>
+            <Text style={styles.requesterMeta}>
+              {isSent
+                ? (isDate ? '💕 Date Invitation Host' : '🚶 Walk Invitation Host')
+                : '⭐ 4.8 · 23 walks completed'}
+            </Text>
+            {(notif?.invitationRoute || notif?.invitationLocation) ? (
+              <Text style={styles.requesterLocation}>📍 {notif.invitationRoute || notif.invitationLocation}</Text>
+            ) : null}
+          </View>
+        </View>
+
+        <View style={styles.dividerLine} />
+
+        {!isSent && notif?.requesterPetName ? (
+          <Text style={styles.petRow}>
+            {speciesEmoji} Pet: {notif.requesterPetName}
+            {notif.requesterPetBreed ? ` · ${notif.requesterPetBreed}` : ''}
+            {notif.requesterPetAge ? ` · ${notif.requesterPetAge}` : ''}
+          </Text>
+        ) : null}
+
+        {tags.length > 0 && (
+          <View style={styles.tagsRow}>
+            {tags.map(t => (
+              <View key={t} style={styles.tag}>
+                <Text style={styles.tagText}>{t}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* Accordion toggle */}
+        <TouchableOpacity
+          style={styles.accordionToggle}
+          onPress={() => setExpanded(!expanded)}
+          activeOpacity={0.85}
+        >
+          <Text style={styles.accordionLabel}>
+            {expanded ? '▼' : '▶'} {isDate
+              ? (isSent ? 'Date Details' : 'Date Details & Actions')
+              : (isSent ? 'Walk Details' : 'Walk Details & Actions')}
+          </Text>
+          <Text style={styles.accordionHint}>{expanded ? 'Tap to collapse' : 'Tap to expand'}</Text>
+        </TouchableOpacity>
+
+        {expanded && (
+          <View style={styles.expandedContent}>
+            <Text style={styles.detailsHeading}>{isDate ? 'Date Details' : 'Walk Details'}</Text>
+
+            {(notif?.invitationRoute || notif?.invitationLocation) ? (
+              <View style={styles.detailRow}>
+                <Text style={styles.detailIcon}>📍</Text>
+                <Text style={styles.detailLabel}>Location</Text>
+                <Text style={styles.detailValue}>{notif.invitationRoute || notif.invitationLocation}</Text>
+              </View>
+            ) : null}
+            {notif?.invitationDate ? (
+              <View style={styles.detailRow}>
+                <Text style={styles.detailIcon}>📅</Text>
+                <Text style={styles.detailLabel}>Date</Text>
+                <Text style={styles.detailValue}>{notif.invitationDate}</Text>
+              </View>
+            ) : null}
+            {notif?.invitationTime ? (
+              <View style={styles.detailRow}>
+                <Text style={styles.detailIcon}>🕐</Text>
+                <Text style={styles.detailLabel}>Time</Text>
+                <Text style={styles.detailValue}>{notif.invitationTime}</Text>
+              </View>
+            ) : null}
+            {durationLabel ? (
+              <View style={[styles.detailRow, styles.detailRowLast]}>
+                <Text style={styles.detailIcon}>⏱</Text>
+                <Text style={styles.detailLabel}>Duration</Text>
+                <Text style={styles.detailValue}>{durationLabel}</Text>
+              </View>
+            ) : null}
+
+            <View style={styles.actionsDivider} />
+
+            {notif?.direction === 'received' && localStatus === 'PENDING' ? (
+              <View style={styles.actionRow}>
+                <TouchableOpacity style={styles.acceptBtn} onPress={() => handleAction('ACCEPTED')}>
+                  <Text style={styles.acceptBtnText}>✓ Accept</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.denyBtn} onPress={() => handleAction('REJECTED')}>
+                  <Text style={styles.denyBtnText}>✗ Deny</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.blockBtn} onPress={handleBlock}>
+                  <Text style={styles.blockBtnText}>⊘ Block</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={[styles.statusChip,
+                localStatus === 'PENDING' ? styles.statusPending
+                : localStatus === 'ACCEPTED' ? styles.statusAccepted
+                : localStatus === 'BLOCKED' ? styles.statusBlocked
+                : styles.statusRejected]}>
+                <Text style={[styles.statusChipText,
+                  localStatus === 'PENDING' ? styles.statusPendingText
+                  : localStatus === 'ACCEPTED' ? styles.statusAcceptedText
+                  : localStatus === 'BLOCKED' ? styles.statusBlockedText
+                  : styles.statusRejectedText]}>
+                  {localStatus === 'PENDING' ? '⏳ Awaiting Response'
+                   : localStatus === 'ACCEPTED' ? '✓ Request Accepted'
+                   : localStatus === 'BLOCKED' ? '⊘ User Blocked'
+                   : '✗ Request Declined'}
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
+      </View>
+
+      {/* Messages divider — fixed */}
+      <View style={styles.todayDivider}>
+        <View style={styles.todayLine} />
+        <Text style={styles.todayText}>Messages</Text>
+        <View style={styles.todayLine} />
+      </View>
+
+      {/* Chat — scrollable */}
       <ScrollView
+        ref={scrollRef}
         style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 16 }]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Requester Card */}
-        <View style={styles.requesterCard}>
-          <View style={styles.requesterTop}>
-            <View style={styles.requesterAvatar}>
-              <Text style={styles.requesterAvatarText}>👩</Text>
-            </View>
-            <View style={styles.requesterInfo}>
-              <Text style={styles.requesterName}>Sarah K.</Text>
-              <Text style={styles.requesterMeta}>⭐ 4.8 · 📍 0.3 km · 18 walks</Text>
-              <View style={styles.requesterPetRow}>
-                <Text style={styles.requesterPetEmoji}>🐕</Text>
-                <Text style={styles.requesterPetInfo}>Max · Corgi · 2y</Text>
-              </View>
-              <View style={styles.tagsRow}>
-                <View style={styles.tag}><Text style={styles.tagText}>Friendly</Text></View>
-                <View style={styles.tag}><Text style={styles.tagText}>Vaccinated</Text></View>
-              </View>
-            </View>
-          </View>
-
-          {/* Accordion toggle */}
-          <TouchableOpacity
-            style={styles.accordionToggle}
-            onPress={() => setExpanded(!expanded)}
-          >
-            <Text style={styles.accordionText}>
-              {expanded ? '▼' : '▶'} Walk Details & Actions
-            </Text>
-          </TouchableOpacity>
-
-          {expanded && (
-            <View style={styles.expandedContent}>
-              <View style={styles.detailRow}>
-                <Text style={styles.detailIcon}>📍</Text>
-                <View style={styles.detailContent}>
-                  <Text style={styles.detailLabel}>Location</Text>
-                  <Text style={styles.detailValue}>Riverside Park Trail, Main Entrance</Text>
-                </View>
-              </View>
-              <View style={styles.detailRow}>
-                <Text style={styles.detailIcon}>📅</Text>
-                <View style={styles.detailContent}>
-                  <Text style={styles.detailLabel}>Date</Text>
-                  <Text style={styles.detailValue}>Saturday, June 8, 2026</Text>
-                </View>
-              </View>
-              <View style={styles.detailRow}>
-                <Text style={styles.detailIcon}>🕐</Text>
-                <View style={styles.detailContent}>
-                  <Text style={styles.detailLabel}>Time</Text>
-                  <Text style={styles.detailValue}>9:00 AM</Text>
-                </View>
-              </View>
-              <View style={[styles.detailRow, styles.detailRowLast]}>
-                <Text style={styles.detailIcon}>⏱</Text>
-                <View style={styles.detailContent}>
-                  <Text style={styles.detailLabel}>Duration</Text>
-                  <Text style={styles.detailValue}>60 minutes</Text>
-                </View>
-              </View>
-
-              {/* Action Buttons */}
-              <View style={styles.actionRow}>
-                <TouchableOpacity style={styles.acceptBtn}>
-                  <Text style={styles.actionBtnText}>✅ Accept</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.denyBtn}>
-                  <Text style={styles.denyBtnText}>❌ Deny</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.blockBtn}>
-                  <Text style={styles.blockBtnText}>🚫 Block</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
-        </View>
-
-        {/* Divider */}
-        <View style={styles.divider}>
-          <Text style={styles.dividerText}>Messages</Text>
-        </View>
-
-        {/* Chat Bubbles */}
         <View style={styles.chatArea}>
-          {CHAT_MESSAGES.map((msg) => (
-            <ChatBubble
-              key={msg.id}
-              message={msg.message}
-              timestamp={msg.time}
-              isOwn={msg.isOwn}
-              avatarEmoji={msg.avatar}
-            />
-          ))}
+          {messages.length === 0 ? (
+            <Text style={styles.emptyChatText}>No messages yet. Say hi!</Text>
+          ) : (
+            messages.map(msg => (
+              <ChatBubble
+                key={msg.id}
+                message={msg.content}
+                timestamp={formatTime(msg.createdAt)}
+                isOwn={msg.isOwn}
+                avatarUrl={msg.isOwn ? undefined : msg.senderAvatarUrl}
+                avatarEmoji={msg.isOwn ? undefined : '👤'}
+              />
+            ))
+          )}
         </View>
       </ScrollView>
 
-      {/* Chat Input */}
-      <ChatInputBar />
+      <ChatInputBar onSend={handleSend} disabled={isChatClosed} />
     </KeyboardAvoidingView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.bg,
-  },
+  container: { flex: 1, backgroundColor: COLORS.bg },
+
   headerBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -168,193 +339,112 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
   },
-  backBtn: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  backText: {
-    fontSize: 22,
-    color: COLORS.primary,
-  },
-  headerTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: COLORS.text,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: 20,
-  },
+  backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  backText: { fontSize: 22, color: COLORS.text },
+  headerTitle: { fontSize: 18, fontWeight: '800', color: COLORS.text },
+  walkChip: { backgroundColor: '#DCFCE7', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 100 },
+  walkChipText: { fontSize: 12, fontWeight: '700', color: '#16A34A' },
+  dateChip: { backgroundColor: COLORS.purpleLight },
+  dateChipText: { color: COLORS.purple },
+
+  scrollView: { flex: 1 },
+  scrollContent: { flexGrow: 1 },
+
   requesterCard: {
     backgroundColor: COLORS.card,
-    margin: 16,
-    borderRadius: 20,
     overflow: 'hidden',
-    shadowColor: COLORS.shadow,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 1,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  requesterTop: {
-    flexDirection: 'row',
-    padding: 16,
-    gap: 14,
-  },
-  requesterAvatar: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: COLORS.primaryLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  requesterAvatarText: {
-    fontSize: 30,
-  },
-  requesterInfo: {
-    flex: 1,
-    gap: 4,
-  },
-  requesterName: {
-    fontSize: 17,
-    fontWeight: '800',
-    color: COLORS.text,
-  },
-  requesterMeta: {
-    fontSize: 13,
-    color: COLORS.textSub,
-  },
-  requesterPetRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 4,
-  },
-  requesterPetEmoji: {
-    fontSize: 16,
-  },
-  requesterPetInfo: {
-    fontSize: 13,
-    color: COLORS.textSub,
-    fontWeight: '500',
-  },
-  tagsRow: {
-    flexDirection: 'row',
-    gap: 6,
-    marginTop: 4,
-  },
-  tag: {
-    backgroundColor: COLORS.primaryLight,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 100,
-  },
-  tagText: {
-    fontSize: 11,
-    color: COLORS.primary,
-    fontWeight: '600',
-  },
-  accordionToggle: {
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: COLORS.bg,
-  },
-  accordionText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.textSub,
-  },
-  expandedContent: {
-    padding: 16,
-    gap: 12,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    gap: 12,
-    paddingBottom: 12,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 1,
+    shadowRadius: 6,
+    elevation: 4,
+    zIndex: 10,
   },
-  detailRowLast: {
-    borderBottomWidth: 0,
-    paddingBottom: 0,
+  requesterTop: { flexDirection: 'row', padding: 16, gap: 14, alignItems: 'flex-start' },
+  avatarOuter: { position: 'relative', width: 72, height: 72, marginRight: 0 },
+  avatarWrap: { width: 72, height: 72, borderRadius: 36, overflow: 'hidden' },
+  avatarImg: { width: 72, height: 72 },
+  avatarFallback: {
+    width: 72, height: 72,
+    backgroundColor: COLORS.primaryLight,
+    alignItems: 'center', justifyContent: 'center',
   },
-  detailIcon: {
-    fontSize: 18,
-    marginTop: 1,
+  avatarFallbackText: { fontSize: 28, fontWeight: '700', color: COLORS.primary },
+  onlineDot: {
+    position: 'absolute', bottom: 2, right: 0,
+    width: 14, height: 14, borderRadius: 7,
+    backgroundColor: '#22C55E', borderWidth: 2, borderColor: COLORS.card,
   },
-  detailContent: {},
-  detailLabel: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    marginBottom: 2,
+  requesterInfo: { flex: 1, gap: 4, paddingTop: 4 },
+  requesterName: { fontSize: 20, fontWeight: '800', color: COLORS.text },
+  requesterMeta: { fontSize: 13, color: COLORS.textSub },
+  requesterLocation: { fontSize: 13, color: COLORS.primary, fontWeight: '500' },
+
+  dividerLine: { height: 1, backgroundColor: COLORS.border, marginHorizontal: 16 },
+  petRow: {
+    fontSize: 14, color: COLORS.text, fontWeight: '500',
+    paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8,
   },
-  detailValue: {
-    fontSize: 14,
-    color: COLORS.text,
-    fontWeight: '500',
+  tagsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 16, paddingBottom: 12 },
+  tag: { backgroundColor: COLORS.primaryLight, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 100 },
+  tagText: { fontSize: 12, color: COLORS.primary, fontWeight: '600' },
+
+  accordionToggle: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: COLORS.primary, paddingHorizontal: 16, paddingVertical: 14,
   },
-  actionRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 4,
+  accordionLabel: { fontSize: 15, fontWeight: '700', color: '#FFFFFF' },
+  accordionHint: { fontSize: 12, color: 'rgba(255,255,255,0.8)', fontWeight: '500' },
+
+  expandedContent: { padding: 16, gap: 10 },
+  detailsHeading: { fontSize: 15, fontWeight: '800', color: COLORS.text, marginBottom: 4 },
+  detailRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: COLORS.border,
   },
-  acceptBtn: {
-    flex: 1,
-    backgroundColor: COLORS.green,
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
+  detailRowLast: { borderBottomWidth: 0, paddingBottom: 0 },
+  detailIcon: { fontSize: 16, width: 22 },
+  detailLabel: { fontSize: 13, color: COLORS.textMuted, width: 72 },
+  detailValue: { flex: 1, fontSize: 14, color: COLORS.text, fontWeight: '600' },
+  actionsDivider: { height: 1, backgroundColor: COLORS.border, marginTop: 4, marginBottom: 4 },
+
+  actionRow: { flexDirection: 'row', gap: 10 },
+  acceptBtn: { flex: 1, backgroundColor: '#22C55E', borderRadius: 12, paddingVertical: 13, alignItems: 'center' },
+  acceptBtnText: { fontSize: 14, fontWeight: '700', color: '#FFFFFF' },
   denyBtn: {
-    flex: 1,
-    backgroundColor: '#FEE2E2',
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: 'center',
+    flex: 1, backgroundColor: COLORS.card, borderRadius: 12,
+    paddingVertical: 13, alignItems: 'center', borderWidth: 1.5, borderColor: '#EF4444',
   },
+  denyBtnText: { fontSize: 14, fontWeight: '700', color: '#EF4444' },
   blockBtn: {
-    flex: 1,
-    backgroundColor: '#F3F4F6',
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: 'center',
+    flex: 1, backgroundColor: COLORS.card, borderRadius: 12,
+    paddingVertical: 13, alignItems: 'center', borderWidth: 1.5, borderColor: COLORS.border,
   },
-  actionBtnText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#FFFFFF',
+  blockBtnText: { fontSize: 14, fontWeight: '700', color: COLORS.textMuted },
+
+  statusChip: { borderRadius: 12, paddingVertical: 13, alignItems: 'center' },
+  statusPending: { backgroundColor: '#FFF7ED' },
+  statusAccepted: { backgroundColor: '#DCFCE7' },
+  statusRejected: { backgroundColor: '#FEE2E2' },
+  statusBlocked: { backgroundColor: '#F3F4F6' },
+  statusChipText: { fontSize: 14, fontWeight: '700' },
+  statusPendingText: { color: COLORS.primary },
+  statusAcceptedText: { color: '#16A34A' },
+  statusRejectedText: { color: '#EF4444' },
+  statusBlockedText: { color: '#6B7280' },
+
+  todayDivider: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 24, marginVertical: 12, gap: 10,
   },
-  denyBtnText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: COLORS.red,
-  },
-  blockBtnText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: COLORS.textSub,
-  },
-  divider: {
-    alignItems: 'center',
-    marginVertical: 8,
-  },
-  dividerText: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    backgroundColor: COLORS.bg,
-    paddingHorizontal: 12,
-  },
-  chatArea: {
-    paddingVertical: 8,
+  todayLine: { flex: 1, height: 1, backgroundColor: COLORS.border },
+  todayText: { fontSize: 12, color: COLORS.textMuted },
+
+  chatArea: { paddingVertical: 4, paddingBottom: 12 },
+  emptyChatText: {
+    textAlign: 'center', color: COLORS.textMuted, fontSize: 13,
+    paddingVertical: 24,
   },
 });
