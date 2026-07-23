@@ -1,10 +1,10 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
 import { COLORS } from '../constants/colors';
-import { MarketplaceItem } from '../constants/mockData';
+import { MarketItem, categoryEmoji, conditionLabel } from '../screens/MarketplaceScreen';
 
 interface ItemCardProps {
-  item: MarketplaceItem;
+  item: MarketItem;
   onPress?: () => void;
 }
 
@@ -12,23 +12,32 @@ export const ItemCard: React.FC<ItemCardProps> = ({ item, onPress }) => {
   return (
     <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.85}>
       <View style={styles.imageContainer}>
-        <Text style={styles.itemEmoji}>{item.emoji}</Text>
+        {item.photoUrl ? (
+          <Image source={{ uri: item.photoUrl }} style={styles.itemPhoto} />
+        ) : (
+          <Text style={styles.itemEmoji}>{categoryEmoji(item.category)}</Text>
+        )}
+        {(item.unreadMessageCount ?? 0) > 0 && <View style={styles.msgDot} />}
       </View>
       <View style={styles.content}>
         <Text style={styles.name} numberOfLines={2}>{item.name}</Text>
         <View style={styles.priceRow}>
-          <Text style={styles.price}>${item.price}</Text>
-          {item.originalPrice && (
+          <Text style={styles.price}>${item.price ?? 0}</Text>
+          {item.originalPrice != null && (
             <Text style={styles.originalPrice}>${item.originalPrice}</Text>
           )}
         </View>
         <View style={styles.footer}>
           <View style={styles.conditionBadge}>
-            <Text style={styles.conditionText}>{item.condition}</Text>
+            <Text style={styles.conditionText}>{conditionLabel(item.condition)}</Text>
           </View>
           <View style={styles.sellerRow}>
-            <Text style={styles.sellerEmoji}>{item.sellerEmoji}</Text>
-            <Text style={styles.sellerName}>{item.sellerName}</Text>
+            {item.sellerAvatarUrl ? (
+              <Image source={{ uri: item.sellerAvatarUrl }} style={styles.sellerAvatar} />
+            ) : (
+              <Text style={styles.sellerEmoji}>👤</Text>
+            )}
+            <Text style={styles.sellerName} numberOfLines={1}>{item.sellerName ?? ''}</Text>
           </View>
         </View>
       </View>
@@ -48,6 +57,7 @@ const styles = StyleSheet.create({
     elevation: 3,
     flex: 1,
     margin: 6,
+    maxWidth: '48%',
   },
   imageContainer: {
     height: 110,
@@ -55,8 +65,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  itemPhoto: {
+    width: '100%',
+    height: '100%',
+  },
   itemEmoji: {
     fontSize: 50,
+  },
+  msgDot: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#EF4444',
+    borderWidth: 2,
+    borderColor: COLORS.card,
   },
   content: {
     padding: 12,
@@ -104,6 +129,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
+    flexShrink: 1,
+  },
+  sellerAvatar: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
   },
   sellerEmoji: {
     fontSize: 12,
@@ -111,5 +142,6 @@ const styles = StyleSheet.create({
   sellerName: {
     fontSize: 11,
     color: COLORS.textMuted,
+    flexShrink: 1,
   },
 });

@@ -5,18 +5,27 @@ import { COLORS } from '../constants/colors';
 
 interface ChatInputBarProps {
   onSend?: (message: string) => void;
+  disabled?: boolean;
 }
 
-export const ChatInputBar: React.FC<ChatInputBarProps> = ({ onSend }) => {
+export const ChatInputBar: React.FC<ChatInputBarProps> = ({ onSend, disabled }) => {
   const [text, setText] = useState('');
   const insets = useSafeAreaInsets();
 
   const handleSend = () => {
-    if (text.trim()) {
+    if (text.trim() && !disabled) {
       onSend?.(text.trim());
       setText('');
     }
   };
+
+  if (disabled) {
+    return (
+      <View style={[styles.disabledContainer, { paddingBottom: insets.bottom + 8 }]}>
+        <Text style={styles.disabledText}>🔒 Conversation closed</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.container, { paddingBottom: insets.bottom + 8 }]}>
@@ -96,5 +105,20 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '700',
+  },
+  disabledContainer: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    backgroundColor: COLORS.card,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 52,
+  },
+  disabledText: {
+    fontSize: 13,
+    color: COLORS.textMuted,
+    fontWeight: '500',
   },
 });
