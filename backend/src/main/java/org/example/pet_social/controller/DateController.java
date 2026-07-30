@@ -1,6 +1,7 @@
 package org.example.pet_social.controller;
 
 import jakarta.servlet.http.HttpServletRequest;
+import org.example.pet_social.dto.CompletedDateResponse;
 import org.example.pet_social.dto.DateFeedItemResponse;
 import org.example.pet_social.dto.DateInvitationResponse;
 import org.example.pet_social.dto.PartnerNotificationResponse;
@@ -36,13 +37,22 @@ public class DateController {
     @GetMapping("/invitations/feed")
     public List<DateFeedItemResponse> feed(@RequestParam(required = false) Double lat,
                                            @RequestParam(required = false) Double lng,
+                                           @RequestParam(required = false) String species,
+                                           @RequestParam(required = false) String age,
+                                           @RequestParam(required = false) String vaccine,
+                                           @RequestParam(required = false) String breed,
                                            HttpServletRequest request) {
-        return board.dateFeed(requestAuth.requireUserId(request), lat, lng);
+        return board.dateFeed(requestAuth.requireUserId(request), lat, lng, species, age, vaccine, breed);
     }
 
     @GetMapping("/invitations/my")
     public List<DateInvitationResponse> myInvitations(HttpServletRequest request) {
         return board.myDateInvitations(requestAuth.requireUserId(request));
+    }
+
+    @GetMapping("/invitations/completed")
+    public List<CompletedDateResponse> completed(HttpServletRequest request) {
+        return board.completedDates(requestAuth.requireUserId(request));
     }
 
     @PostMapping("/invitations")
