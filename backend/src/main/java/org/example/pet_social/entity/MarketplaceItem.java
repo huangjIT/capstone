@@ -42,9 +42,14 @@ public class MarketplaceItem {
     @Column(length = 2000)
     private String description;
 
-    // Photo URL uploaded client-side (Firebase Storage); emoji remains the fallback thumbnail
+    // Photo URL uploaded client-side (Firebase Storage); emoji remains the fallback thumbnail.
+    // Always mirrors the first entry of imageUrls — kept for older clients/rows with one photo.
     @Column(name = "photo_url")
     private String photoUrl;
+
+    // Pipe-separated photo URLs (up to 5) — see PartnerInvitation.imageUrls for the same pattern
+    @Column(name = "image_urls", length = 2500)
+    private String imageUrls;
 
     // Pickup location label + coordinates from the mobile app's post form
     @Column
@@ -117,6 +122,9 @@ public class MarketplaceItem {
 
     public String getPhotoUrl() { return photoUrl; }
     public void setPhotoUrl(String photoUrl) { this.photoUrl = photoUrl; }
+
+    public String getImageUrls() { return imageUrls; }
+    public void setImageUrls(String imageUrls) { this.imageUrls = imageUrls; }
 
     public String getLocation() { return location; }
     public void setLocation(String location) { this.location = location; }

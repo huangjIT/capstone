@@ -27,6 +27,9 @@ export const ItemCard: React.FC<ItemCardProps> = ({ item, onPress }) => {
             <Text style={styles.originalPrice}>${item.originalPrice}</Text>
           )}
         </View>
+        {item.location ? (
+          <Text style={styles.location} numberOfLines={1}>📍 {item.location}</Text>
+        ) : null}
         <View style={styles.footer}>
           <View style={styles.conditionBadge}>
             <Text style={styles.conditionText}>{conditionLabel(item.condition)}</Text>
@@ -108,6 +111,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.textMuted,
     textDecorationLine: 'line-through',
+  },
+  location: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    marginBottom: 8,
   },
   footer: {
     flexDirection: 'row',

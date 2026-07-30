@@ -29,7 +29,13 @@ public class MarketService {
 
     public record ItemBody(String name, String category, String condition, Double price,
                            Double originalPrice, String description, String location,
-                           Double latitude, Double longitude, String photoUrl, String status) {}
+                           Double latitude, Double longitude, String photoUrl, String status,
+                           List<String> imageUrls) {}
+
+    // This is a casual pet-gear marketplace, not a general classifieds site — cap the
+    // selling price so listings stay in "used leash/carrier" territory. originalPrice
+    // (what it cost new) is informational only and isn't capped.
+    private static final double MAX_PRICE = 500.0;
 
     private final MarketplaceItemRepository itemRepository;
     private final MessageRepository messageRepository;
@@ -43,13 +49,17 @@ public class MarketService {
         this.userService = userService;
     }
 
+    /** Browse feed: everyone else's listings — sellers already manage their own via "My Listings". */
     public List<MarketItemResponse> listItems(Long userId, String category) {
         String normalized = category == null || category.isBlank() || "ALL".equalsIgnoreCase(category)
                 ? null : UiFormat.toDbValue(category);
         List<MarketplaceItem> items = normalized == null
                 ? itemRepository.findByStatusOrderByCreatedAtDesc("ACTIVE")
                 : itemRepository.findByStatusAndCategoryOrderByCreatedAtDesc("ACTIVE", normalized);
-        return withUnread(items, userId);
+        List<MarketplaceItem> othersOnly = items.stream()
+                .filter(i -> !userId.equals(i.getSellerId()))
+                .toList();
+        return withUnread(othersOnly, userId);
     }
 
     public List<MarketItemResponse> myItems(Long userId) {
@@ -171,8 +181,17 @@ public class MarketService {
         if (body.price() == null || body.price() < 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "price must be a non-negative number");
         }
+        if (body.price() > MAX_PRICE) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "price must be $" + MAX_PRICE + " or less");
+        }
         if (body.category() == null || body.category().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "category is required");
+        }
+        if (body.location() == null || body.location().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "pickup location is required");
+        }
+        if (body.imageUrls() == null || body.imageUrls().stream().noneMatch(u -> u != null && !u.isBlank())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "at least one photo is required");
         }
     }
 
@@ -183,7 +202,15 @@ public class MarketService {
         item.setLocation(body.location());
         item.setLatitude(body.latitude());
         item.setLongitude(body.longitude());
-        if (body.photoUrl() != null) {
+        if (body.imageUrls() != null) {
+            List<String> capped = body.imageUrls().stream()
+                    .filter(u -> u != null && !u.isBlank())
+                    .limit(5)
+                    .toList();
+            item.setImageUrls(capped.isEmpty() ? null : String.join("|", capped));
+            // photoUrl mirrors the first photo so older screens (chat list thumbnails) keep working
+            item.setPhotoUrl(capped.isEmpty() ? null : capped.get(0));
+        } else if (body.photoUrl() != null) {
             item.setPhotoUrl(body.photoUrl());
         }
     }

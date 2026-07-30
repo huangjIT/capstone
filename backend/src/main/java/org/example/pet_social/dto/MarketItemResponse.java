@@ -3,6 +3,8 @@ package org.example.pet_social.dto;
 import org.example.pet_social.entity.MarketplaceItem;
 import org.example.pet_social.entity.User;
 
+import java.util.List;
+
 /**
  * Marketplace item as the mobile app's MarketItem interface expects it: raw
  * enum values (TOY, LIKE_NEW, ACTIVE) — unlike the legacy display-formatted
@@ -22,7 +24,9 @@ public record MarketItemResponse(
         String status,
         String sellerName,
         String sellerAvatarUrl,
-        Integer unreadMessageCount
+        Integer unreadMessageCount,
+        List<String> imageUrls,
+        String createdAt
 ) {
     public static MarketItemResponse from(MarketplaceItem item, int unreadMessageCount) {
         User seller = item.getSeller();
@@ -40,7 +44,11 @@ public record MarketItemResponse(
                 item.getStatus(),
                 seller == null ? null : seller.getName(),
                 seller == null ? null : seller.getAvatarUrl(),
-                unreadMessageCount
+                unreadMessageCount,
+                item.getImageUrls() == null || item.getImageUrls().isBlank()
+                        ? List.of()
+                        : List.of(item.getImageUrls().split("\\|")),
+                item.getCreatedAt() == null ? null : item.getCreatedAt().toString()
         );
     }
 }
