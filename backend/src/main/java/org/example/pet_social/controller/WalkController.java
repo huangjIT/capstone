@@ -1,6 +1,7 @@
 package org.example.pet_social.controller;
 
 import jakarta.servlet.http.HttpServletRequest;
+import org.example.pet_social.dto.CompletedWalkResponse;
 import org.example.pet_social.dto.PartnerNotificationResponse;
 import org.example.pet_social.dto.WalkFeedItemResponse;
 import org.example.pet_social.dto.WalkInvitationResponse;
@@ -44,6 +45,11 @@ public class WalkController {
     @GetMapping("/invitations/my")
     public List<WalkInvitationResponse> myInvitations(HttpServletRequest request) {
         return board.myWalkInvitations(requestAuth.requireUserId(request));
+    }
+
+    @GetMapping("/invitations/completed")
+    public List<CompletedWalkResponse> completed(HttpServletRequest request) {
+        return board.completedWalks(requestAuth.requireUserId(request));
     }
 
     @PostMapping("/invitations")

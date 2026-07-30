@@ -179,13 +179,19 @@ export const FindPartnersScreen: React.FC<FindPartnersScreenProps> = ({ navigati
 
   const onRefresh = useCallback(() => { setRefreshing(true); loadData(); }, [loadData]);
 
+  const matchesTypeFilter = (species?: string) => {
+    if (typeFilter === 'Dogs') return species === 'DOG';
+    if (typeFilter === 'Cats') return species === 'CAT';
+    if (typeFilter === 'Other') return !!species && species !== 'DOG' && species !== 'CAT';
+    return true; // All
+  };
+
   const filtered = feed.filter(item => {
     if (typeFilter === 'All') return true;
-    const target = typeFilter === 'Dogs' ? 'DOG' : 'CAT';
     if (item.pets && item.pets.length > 0) {
-      return item.pets.some(p => p.petSpecies === target);
+      return item.pets.some(p => matchesTypeFilter(p.petSpecies));
     }
-    return item.petSpecies === target;
+    return matchesTypeFilter(item.petSpecies);
   });
 
   const petTags = (item: WalkFeedItem): string[] => {
@@ -216,9 +222,14 @@ export const FindPartnersScreen: React.FC<FindPartnersScreenProps> = ({ navigati
       <Animated.View style={[styles.invSection, { maxHeight: invMaxHeight, opacity: invAnim, overflow: 'hidden' }]}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>My Invitations</Text>
-          <TouchableOpacity style={styles.postNewBtn} onPress={() => navigation.navigate('PostInvitation')}>
-            <Text style={styles.postNewText}>+ Post New</Text>
-          </TouchableOpacity>
+          <View style={styles.sectionHeaderActions}>
+            <TouchableOpacity style={styles.completedBtn} onPress={() => navigation.navigate('CompletedWalks')}>
+              <Text style={styles.completedText}>✓ Completed</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.postNewBtn} onPress={() => navigation.navigate('PostInvitation')}>
+              <Text style={styles.postNewText}>+ Post New</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {myInvitations.length === 0 ? (
@@ -273,7 +284,7 @@ export const FindPartnersScreen: React.FC<FindPartnersScreenProps> = ({ navigati
       <View style={styles.filtersSection}>
         <FilterRow
           label="Type"
-          options={['All', 'Dogs', 'Cats']}
+          options={['All', 'Dogs', 'Cats', 'Other']}
           active={typeFilter}
           onSelect={setTypeFilter}
         />
@@ -384,6 +395,16 @@ const styles = StyleSheet.create({
     paddingTop: 14,
     marginBottom: 10,
   },
+  sectionHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  completedBtn: {
+    backgroundColor: COLORS.bg,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 100,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  completedText: { color: COLORS.textSub, fontSize: 12, fontWeight: '700' },
   postNewBtn: {
     backgroundColor: COLORS.primary,
     paddingHorizontal: 14,

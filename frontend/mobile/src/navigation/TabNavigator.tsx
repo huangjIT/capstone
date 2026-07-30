@@ -20,6 +20,8 @@ import { PostMarketItemScreen } from '../screens/PostMarketItemScreen';
 import { MarketChatsScreen } from '../screens/MarketChatsScreen';
 import { EditInvitationScreen } from '../screens/EditInvitationScreen';
 import { ConnectPetProfileScreen } from '../screens/ConnectPetProfileScreen';
+import { CompletedWalksScreen } from '../screens/CompletedWalksScreen';
+import { CompletedDatesScreen } from '../screens/CompletedDatesScreen';
 
 const Tab = createBottomTabNavigator();
 
@@ -30,6 +32,7 @@ const WalkNavigator = () => (
     <WalkStack.Screen name="PostInvitation" component={PostInvitationScreen} />
     <WalkStack.Screen name="EditInvitation" component={EditInvitationScreen} />
     <WalkStack.Screen name="ConnectPetProfile" component={ConnectPetProfileScreen} />
+    <WalkStack.Screen name="CompletedWalks" component={CompletedWalksScreen} />
   </WalkStack.Navigator>
 );
 
@@ -49,6 +52,7 @@ const DateNavigator = () => (
     <DateStack.Screen name="PostDateInvitation" component={PostDateInvitationScreen} />
     <DateStack.Screen name="DatePetProfile" component={DatePetProfileScreen} />
     <DateStack.Screen name="EditDateInvitation" component={EditDateInvitationScreen} />
+    <DateStack.Screen name="CompletedDates" component={CompletedDatesScreen} />
   </DateStack.Navigator>
 );
 
@@ -141,7 +145,7 @@ export const TabNavigator: React.FC = () => {
         component={WalkNavigator}
         options={({ route }) => {
           const routeName = getFocusedRouteNameFromRoute(route) ?? 'FindPartners';
-          const hideTabBar = ['ConnectPetProfile', 'PostInvitation', 'EditInvitation'].includes(routeName);
+          const hideTabBar = ['ConnectPetProfile', 'PostInvitation', 'EditInvitation', 'CompletedWalks'].includes(routeName);
           return {
             tabBarIcon: ({ focused }) => (
               <TabIcon emoji="🚶" label="Walk" focused={focused} badge={pendingCount > 0 || unreadMsgCount > 0} />
@@ -155,7 +159,7 @@ export const TabNavigator: React.FC = () => {
         component={DateNavigator}
         options={({ route }) => {
           const routeName = getFocusedRouteNameFromRoute(route) ?? 'PetBlindDate';
-          const hideTabBar = ['PostDateInvitation', 'DatePetProfile', 'EditDateInvitation'].includes(routeName);
+          const hideTabBar = ['PostDateInvitation', 'DatePetProfile', 'EditDateInvitation', 'CompletedDates'].includes(routeName);
           return {
             tabBarIcon: ({ focused }) => (
               <TabIcon emoji="💕" label="Date" focused={focused} />

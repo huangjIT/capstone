@@ -14,5 +14,9 @@ public record WalkInvitationResponse(
         String message,
         String status,
         List<String> hostPetIds,
-        Integer pendingRequestCount
+        Integer pendingRequestCount,
+        Double latitude,
+        Double longitude,
+        Double endLatitude,
+        Double endLongitude
 ) {}

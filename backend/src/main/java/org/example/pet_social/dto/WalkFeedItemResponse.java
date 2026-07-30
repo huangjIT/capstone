@@ -35,5 +35,7 @@ public record WalkFeedItemResponse(
         Integer unreadMessageCount,
         List<FeedPetInfo> pets,
         Double latitude,
-        Double longitude
+        Double longitude,
+        Double endLatitude,
+        Double endLongitude
 ) {}
