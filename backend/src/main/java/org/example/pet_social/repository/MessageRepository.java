@@ -62,6 +62,9 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
            "WHERE m.contextType = :contextType AND m.contextId = :contextId ORDER BY m.createdAt ASC")
     List<Message> findByContext(@Param("contextType") String contextType, @Param("contextId") Long contextId);
 
+    // Total messages in one context thread — backs the 5-message cap while a walk/date request is still pending
+    long countByContextTypeAndContextId(String contextType, Long contextId);
+
     // Mark everything sent to me inside one context thread as read
     @Modifying
     @Query("UPDATE Message m SET m.isRead = true, m.readAt = CURRENT_TIMESTAMP " +

@@ -54,7 +54,10 @@ public class MessageController {
         this.appEventsProducer = appEventsProducer;
     }
 
+    private static final int PENDING_MESSAGE_LIMIT = 5;
+
     @PostMapping
+    @Transactional
     public ResponseEntity<Object> send(@Valid @RequestBody MessageSendRequest req, HttpServletRequest request) {
         Long userId = authUserId(request);
         User sender = userService.getUserById(userId);
@@ -82,9 +85,18 @@ public class MessageController {
             contextType = req.contextType().toUpperCase(Locale.ROOT);
             contextId = req.contextId();
         }
-        if (("WALK_REQUEST".equals(contextType) || "DATE_REQUEST".equals(contextType))
-                && !isRequestParticipant(contextType, contextId, userId)) {
-            return ResponseEntity.status(403).body(Map.of("message", "not a participant of this request"));
+        if ("WALK_REQUEST".equals(contextType) || "DATE_REQUEST".equals(contextType)) {
+            PartnerRequest pr = partnerBoardService.requestForThread(contextType, contextId);
+            if (pr == null || !(userId.equals(pr.getRequesterId()) || userId.equals(pr.getInvitation().getHostId()))) {
+                return ResponseEntity.status(403).body(Map.of("message", "not a participant of this request"));
+            }
+            // While the host hasn't accepted yet, cap the thread so a stranger can't spam
+            // an unlimited number of messages before the host has even responded.
+            if (PartnerRequest.STATUS_PENDING.equals(pr.getStatus())
+                    && messageRepository.countByContextTypeAndContextId(contextType, contextId) >= PENDING_MESSAGE_LIMIT) {
+                return ResponseEntity.status(403).body(Map.of("message",
+                        "5-message limit reached while this request is pending. You can message freely once it's accepted."));
+            }
         }
 
         Message message = new Message(sender, receiver, req.content());
