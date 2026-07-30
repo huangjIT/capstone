@@ -7,6 +7,8 @@ import {
   TouchableOpacity,
   Platform,
   Image,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import MapView, { Marker, PROVIDER_GOOGLE, PROVIDER_DEFAULT } from 'react-native-maps';
 import type { MapView as MapViewType } from 'react-native-maps';
@@ -14,7 +16,7 @@ import * as Location from 'expo-location';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { COLORS } from '../constants/colors';
-import { apiGet } from '../utils/api';
+import { apiGet, apiPost } from '../utils/api';
 import type { WalkFeedItem } from './FindPartnersScreen';
 
 const DEFAULT_REGION = {
@@ -34,7 +36,8 @@ type MapFeedItem = WalkFeedItem & { latitude?: number; longitude?: number };
 const PosterMarker: React.FC<{
   item: MapFeedItem;
   onCalloutPress: () => void;
-}> = ({ item, onCalloutPress }) => {
+  onMarkerPress: () => void;
+}> = ({ item, onCalloutPress, onMarkerPress }) => {
   const [tracking, setTracking] = useState(true);
 
   return (
@@ -43,6 +46,7 @@ const PosterMarker: React.FC<{
       title={item.ownerName || item.petName}
       description={`${item.route || ''} · ${item.date || ''} ${item.time || ''}`}
       tracksViewChanges={tracking}
+      onPress={onMarkerPress}
       onCalloutPress={onCalloutPress}
     >
       <View style={styles.markerWrap}>
@@ -71,6 +75,9 @@ const PosterMarker: React.FC<{
 export const HomeMapScreen: React.FC<{ navigation?: any }> = ({ navigation }) => {
   const insets = useSafeAreaInsets();
   const [feed, setFeed] = useState<MapFeedItem[]>([]);
+  const [selectedItem, setSelectedItem] = useState<MapFeedItem | null>(null);
+  const [sentIds, setSentIds] = useState<Set<string>>(new Set());
+  const [connecting, setConnecting] = useState(false);
   const mapRef = useRef<MapViewType>(null);
 
   const handleLocateMe = async () => {
@@ -93,8 +100,12 @@ export const HomeMapScreen: React.FC<{ navigation?: any }> = ({ navigation }) =>
           feedPath += `?lat=${loc.coords.latitude}&lng=${loc.coords.longitude}`;
         }
       } catch (_) {}
-      const items = await apiGet<MapFeedItem[]>(feedPath);
+      const [items, sentReqs] = await Promise.all([
+        apiGet<MapFeedItem[]>(feedPath),
+        apiGet<Array<{ invitationId: string }>>('/api/walk/requests/my-sent').catch(() => []),
+      ]);
       setFeed(items);
+      setSentIds(new Set(sentReqs.map(r => r.invitationId)));
     } catch (_) {}
   }, []);
 
@@ -120,6 +131,24 @@ export const HomeMapScreen: React.FC<{ navigation?: any }> = ({ navigation }) =>
     );
   };
 
+  const selectItem = (item: MapFeedItem) => {
+    setSelectedItem(item);
+    focusItem(item);
+  };
+
+  const handleConnect = async () => {
+    if (!selectedItem || sentIds.has(selectedItem.id)) return;
+    try {
+      setConnecting(true);
+      await apiPost('/api/walk/requests', { invitationId: selectedItem.id });
+      setSentIds(prev => new Set([...prev, selectedItem.id]));
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Failed to send request');
+    } finally {
+      setConnecting(false);
+    }
+  };
+
   return (
     <View style={styles.container}>
       <MapView
@@ -139,12 +168,8 @@ export const HomeMapScreen: React.FC<{ navigation?: any }> = ({ navigation }) =>
           <PosterMarker
             key={item.id}
             item={item}
-            onCalloutPress={() =>
-              navigation?.navigate('Walk', {
-                screen: 'ConnectPetProfile',
-                params: { feedItem: item },
-              })
-            }
+            onMarkerPress={() => selectItem(item)}
+            onCalloutPress={() => selectItem(item)}
           />
         ))}
       </MapView>
@@ -186,50 +211,92 @@ export const HomeMapScreen: React.FC<{ navigation?: any }> = ({ navigation }) =>
       {/* Bottom Sheet */}
       <View style={[styles.bottomSheet, { paddingBottom: insets.bottom + 16 }]}>
         <View style={styles.sheetHandle} />
-        <View style={styles.sheetHeader}>
-          <View>
-            <Text style={styles.sectionTitle}>Nearby Walking Partners</Text>
-            <Text style={styles.nearbyCount}>🐾 {feed.length} pets nearby</Text>
-          </View>
-          <TouchableOpacity
-            style={styles.seeAllBtn}
-            onPress={() => navigation?.navigate('Walk')}
-          >
-            <Text style={styles.seeAllText}>See all</Text>
-          </TouchableOpacity>
-        </View>
-        {feed.length === 0 ? (
-          <View style={styles.emptyRow}>
-            <Text style={styles.emptyText}>No walk partners nearby yet.</Text>
+
+        {selectedItem ? (
+          <View style={styles.connectPanel}>
+            <TouchableOpacity style={styles.connectClose} onPress={() => setSelectedItem(null)}>
+              <Text style={styles.connectCloseText}>✕</Text>
+            </TouchableOpacity>
+            <View style={styles.connectTop}>
+              <View style={styles.petMiniAvatar}>
+                {selectedItem.petProfilePhotoUrl ? (
+                  <Image source={{ uri: selectedItem.petProfilePhotoUrl }} style={styles.petMiniPhoto} />
+                ) : (
+                  <Text style={styles.petMiniEmoji}>{selectedItem.petSpecies === 'CAT' ? '🐈' : '🐕'}</Text>
+                )}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.connectName} numberOfLines={1}>
+                  {selectedItem.petName || selectedItem.ownerName}
+                </Text>
+                <Text style={styles.connectMeta} numberOfLines={1}>
+                  {selectedItem.route || ''}{selectedItem.route ? ' · ' : ''}{selectedItem.date} {selectedItem.time}
+                </Text>
+                {selectedItem.distanceLabel ? (
+                  <Text style={styles.connectMeta}>📍 {selectedItem.distanceLabel} away</Text>
+                ) : null}
+              </View>
+            </View>
+            <TouchableOpacity
+              style={[styles.connectBtn, sentIds.has(selectedItem.id) && styles.connectBtnSent]}
+              onPress={handleConnect}
+              disabled={connecting || sentIds.has(selectedItem.id)}
+            >
+              {connecting
+                ? <ActivityIndicator color="#FFFFFF" size="small" />
+                : <Text style={styles.connectBtnText}>
+                    {sentIds.has(selectedItem.id) ? '✓ Requested' : 'Connect →'}
+                  </Text>}
+            </TouchableOpacity>
           </View>
         ) : (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.petCardsScroll}
-          >
-            {feed.map((item) => (
+          <>
+            <View style={styles.sheetHeader}>
+              <View>
+                <Text style={styles.sectionTitle}>Nearby Walking Partners</Text>
+                <Text style={styles.nearbyCount}>🐾 {feed.length} pets nearby</Text>
+              </View>
               <TouchableOpacity
-                key={item.id}
-                style={styles.petMiniCard}
-                activeOpacity={0.85}
-                onPress={() => focusItem(item)}
+                style={styles.seeAllBtn}
+                onPress={() => navigation?.navigate('Walk')}
               >
-                <View style={styles.petMiniAvatar}>
-                  {item.petProfilePhotoUrl ? (
-                    <Image source={{ uri: item.petProfilePhotoUrl }} style={styles.petMiniPhoto} />
-                  ) : (
-                    <Text style={styles.petMiniEmoji}>{item.petSpecies === 'CAT' ? '🐈' : '🐕'}</Text>
-                  )}
-                </View>
-                <Text style={styles.petMiniName} numberOfLines={1}>{item.petName || item.ownerName}</Text>
-                <Text style={styles.petMiniBreed} numberOfLines={1}>{item.petBreed || item.route || ''}</Text>
-                <Text style={styles.petMiniOwner} numberOfLines={1}>
-                  {item.distanceLabel ? `📍 ${item.distanceLabel}` : item.ownerName}
-                </Text>
+                <Text style={styles.seeAllText}>See all</Text>
               </TouchableOpacity>
-            ))}
-          </ScrollView>
+            </View>
+            {feed.length === 0 ? (
+              <View style={styles.emptyRow}>
+                <Text style={styles.emptyText}>No walk partners nearby yet.</Text>
+              </View>
+            ) : (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.petCardsScroll}
+              >
+                {feed.map((item) => (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={styles.petMiniCard}
+                    activeOpacity={0.85}
+                    onPress={() => selectItem(item)}
+                  >
+                    <View style={styles.petMiniAvatar}>
+                      {item.petProfilePhotoUrl ? (
+                        <Image source={{ uri: item.petProfilePhotoUrl }} style={styles.petMiniPhoto} />
+                      ) : (
+                        <Text style={styles.petMiniEmoji}>{item.petSpecies === 'CAT' ? '🐈' : '🐕'}</Text>
+                      )}
+                    </View>
+                    <Text style={styles.petMiniName} numberOfLines={1}>{item.petName || item.ownerName}</Text>
+                    <Text style={styles.petMiniBreed} numberOfLines={1}>{item.petBreed || item.route || ''}</Text>
+                    <Text style={styles.petMiniOwner} numberOfLines={1}>
+                      {item.distanceLabel ? `📍 ${item.distanceLabel}` : item.ownerName}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            )}
+          </>
         )}
       </View>
     </View>
@@ -403,6 +470,44 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     marginBottom: 14,
   },
+  connectPanel: {
+    paddingHorizontal: 20,
+  },
+  connectClose: {
+    position: 'absolute',
+    top: -4,
+    right: 20,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: COLORS.bg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  connectCloseText: { fontSize: 13, color: COLORS.textSub, fontWeight: '700' },
+  connectTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 16,
+    paddingRight: 36,
+  },
+  connectName: { fontSize: 17, fontWeight: '800', color: COLORS.text, marginBottom: 2 },
+  connectMeta: { fontSize: 13, color: COLORS.textSub, marginTop: 1 },
+  connectBtn: {
+    borderRadius: 100,
+    paddingVertical: 14,
+    alignItems: 'center',
+    backgroundColor: COLORS.primary,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  connectBtnSent: { backgroundColor: '#22C55E', shadowColor: '#22C55E' },
+  connectBtnText: { fontSize: 14, fontWeight: '700', color: '#FFFFFF' },
   sectionTitle: {
     fontSize: 16,
     fontWeight: '700',
