@@ -34,10 +34,26 @@ interface Pet {
   isNeutered?: boolean;
   bio?: string;
   profilePhotoUrl?: string;
+  dateOfBirth?: string;
+}
+
+// Computed live against today, not stored — a pet born 2024-01-01 reads "2y" in
+// 2026 and "1y" in 2025 without any data migration.
+function petAgeLabel(dateOfBirth?: string): string | null {
+  if (!dateOfBirth) return null;
+  const dob = new Date(dateOfBirth);
+  if (isNaN(dob.getTime())) return null;
+  const now = new Date();
+  let years = now.getFullYear() - dob.getFullYear();
+  let months = now.getMonth() - dob.getMonth();
+  if (now.getDate() < dob.getDate()) months -= 1;
+  if (months < 0) { years -= 1; months += 12; }
+  if (years <= 0) return `${Math.max(months, 1)}mo`;
+  return `${years}y`;
 }
 
 interface Stats {
-  posts: number;
+  listings: number;
   pets: number;
   friends: number;
 }
@@ -50,7 +66,7 @@ export const MeProfileScreen: React.FC<MeProfileScreenProps> = ({ navigation }) 
   const insets = useSafeAreaInsets();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [pets, setPets] = useState<Pet[]>([]);
-  const [stats, setStats] = useState<Stats>({ posts: 0, pets: 0, friends: 0 });
+  const [stats, setStats] = useState<Stats>({ listings: 0, pets: 0, friends: 0 });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -149,13 +165,8 @@ export const MeProfileScreen: React.FC<MeProfileScreenProps> = ({ navigation }) 
         <Text style={styles.cardTitle}>My Activity</Text>
         <View style={styles.statsRow}>
           <View style={styles.statItem}>
-            <Text style={styles.statValue}>{stats.posts}</Text>
-            <Text style={styles.statLabel}>Posts</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statItem}>
-            <Text style={styles.statValue}>{stats.friends}</Text>
-            <Text style={styles.statLabel}>Friends</Text>
+            <Text style={styles.statValue}>{stats.listings}</Text>
+            <Text style={styles.statLabel}>Listings</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
@@ -186,14 +197,14 @@ export const MeProfileScreen: React.FC<MeProfileScreenProps> = ({ navigation }) 
                   <Image source={{ uri: pet.profilePhotoUrl }} style={styles.petAvatarImage} />
                 ) : (
                   <Text style={styles.petAvatarEmoji}>
-                    {pet.species === 'CAT' ? '🐈' : '🐕'}
+                    {pet.species === 'CAT' ? '🐈' : pet.species === 'OTHER' ? '🐾' : '🐕'}
                   </Text>
                 )}
               </View>
               <View style={styles.petInfo}>
                 <Text style={styles.petName}>{pet.name}</Text>
                 <Text style={styles.petBreed}>
-                  {[pet.breed, pet.gender].filter(Boolean).join(' · ')}
+                  {[pet.breed, pet.gender, petAgeLabel(pet.dateOfBirth)].filter(Boolean).join(' · ')}
                 </Text>
                 <View style={styles.petTagsRow}>
                   {petTags(pet).map(tag => (

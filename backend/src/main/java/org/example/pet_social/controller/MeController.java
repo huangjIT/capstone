@@ -7,8 +7,8 @@ import jakarta.validation.constraints.Size;
 import org.example.pet_social.dto.UserProfileResponse;
 import org.example.pet_social.entity.User;
 import org.example.pet_social.repository.FriendshipRepository;
+import org.example.pet_social.repository.MarketplaceItemRepository;
 import org.example.pet_social.repository.PetRepository;
-import org.example.pet_social.repository.PostRepository;
 import org.example.pet_social.service.UserService;
 import org.example.pet_social.web.RequestAuth;
 import org.springframework.http.ResponseEntity;
@@ -34,16 +34,16 @@ public class MeController {
 
     private final UserService userService;
     private final PetRepository petRepository;
-    private final PostRepository postRepository;
+    private final MarketplaceItemRepository marketplaceItemRepository;
     private final FriendshipRepository friendshipRepository;
     private final RequestAuth requestAuth;
 
     public MeController(UserService userService, PetRepository petRepository,
-                        PostRepository postRepository, FriendshipRepository friendshipRepository,
+                        MarketplaceItemRepository marketplaceItemRepository, FriendshipRepository friendshipRepository,
                         RequestAuth requestAuth) {
         this.userService = userService;
         this.petRepository = petRepository;
-        this.postRepository = postRepository;
+        this.marketplaceItemRepository = marketplaceItemRepository;
         this.friendshipRepository = friendshipRepository;
         this.requestAuth = requestAuth;
     }
@@ -69,12 +69,16 @@ public class MeController {
         return ResponseEntity.ok(UserProfileResponse.from(userService.registerUser(user)));
     }
 
-    /** Me-tab stat tiles: {posts, pets, friends}. */
+    /**
+     * Me-tab stat tiles: {listings, pets, friends}. "listings" is marketplace
+     * items the user has posted that aren't withdrawn — sold items still count
+     * (they happened), only a withdrawn/removed listing drops off.
+     */
     @GetMapping("/stats")
     public Map<String, Long> stats(HttpServletRequest request) {
         Long userId = requestAuth.requireUserId(request);
         return Map.of(
-                "posts", postRepository.countByUser_Id(userId),
+                "listings", marketplaceItemRepository.countBySeller_IdAndStatusNot(userId, "WITHDRAWN"),
                 "pets", petRepository.countByOwner_Id(userId),
                 "friends", friendshipRepository.countAcceptedForUser(userId)
         );
