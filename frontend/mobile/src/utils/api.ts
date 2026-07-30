@@ -11,6 +11,12 @@ async function authHeaders(): Promise<Record<string, string>> {
   };
 }
 
+// Delete/no-content responses (204, or 200 with an empty body) have nothing to
+// parse — JSON.parse('') throws, so treat an empty body as success with no payload.
+function parseBody<T>(text: string): T {
+  return text ? (JSON.parse(text) as T) : (undefined as T);
+}
+
 export async function apiPost<T>(path: string, body: object): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
     method: 'POST',
@@ -19,7 +25,7 @@ export async function apiPost<T>(path: string, body: object): Promise<T> {
   });
   const text = await res.text();
   if (!res.ok) throw new Error(text || 'Request failed');
-  return JSON.parse(text) as T;
+  return parseBody<T>(text);
 }
 
 export async function apiGet<T>(path: string): Promise<T> {
@@ -29,7 +35,7 @@ export async function apiGet<T>(path: string): Promise<T> {
   });
   const text = await res.text();
   if (!res.ok) throw new Error(text || 'Request failed');
-  return JSON.parse(text) as T;
+  return parseBody<T>(text);
 }
 
 export async function apiPut<T>(path: string, body: object): Promise<T> {
@@ -40,7 +46,7 @@ export async function apiPut<T>(path: string, body: object): Promise<T> {
   });
   const text = await res.text();
   if (!res.ok) throw new Error(text || 'Request failed');
-  return JSON.parse(text) as T;
+  return parseBody<T>(text);
 }
 
 export async function apiDelete<T>(path: string): Promise<T> {
@@ -50,7 +56,7 @@ export async function apiDelete<T>(path: string): Promise<T> {
   });
   const text = await res.text();
   if (!res.ok) throw new Error(text || 'Request failed');
-  return JSON.parse(text) as T;
+  return parseBody<T>(text);
 }
 
 export async function saveToken(token: string) {
