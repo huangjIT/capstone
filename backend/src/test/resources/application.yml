@@ -1,0 +1,17 @@
+# Test overrides: run the full Spring context without Docker.
+# H2 (PostgreSQL compatibility mode) replaces Postgres; Kafka listeners don't
+# auto-start (no broker in CI); Redis calls are lazy so no server is needed
+# until a cache path is actually exercised.
+spring:
+  datasource:
+    url: jdbc:h2:mem:pet_social_test;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH
+    username: sa
+    password: ""
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+  kafka:
+    listener:
+      auto-startup: false

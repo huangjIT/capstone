@@ -1,0 +1,114 @@
+
+server:
+  port: 8080
+  compression:
+    # Feed responses are verbose denormalized JSON read over mobile networks.
+    enabled: true
+    mime-types: application/json
+    min-response-size: 1024
+
+management:
+  endpoints:
+    web:
+      # Only health/info are public. Prometheus/metrics expose internal timing and
+      # topology; enable them behind an override (env MGMT_ENDPOINTS) in trusted envs only.
+      exposure:
+        include: ${MGMT_ENDPOINTS:health,info}
+  endpoint:
+    prometheus:
+      enabled: ${MGMT_PROMETHEUS_ENABLED:false}
+
+app:
+  # HMAC secret for signing app JWTs. MUST be overridden via APP_JWT_SECRET in every
+  # non-local environment — the app refuses to start with the built-in dev value unless
+  # spring.profiles.active includes "dev" (see JwtService).
+  jwt:
+    secret: ${APP_JWT_SECRET:pawpal-dev-secret-change-in-production}
+    ttl-hours: ${APP_JWT_TTL_HOURS:168}
+  cors:
+    # Comma-separated allowed origins. Defaults to local Expo/emulator dev hosts; set
+    # APP_CORS_ALLOWED_ORIGINS to your web/app origin(s) in production.
+    allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:8081,http://localhost:19006,http://10.0.2.2:8081}
+  auth:
+    google:
+      # OAuth client id for POST /api/auth/google audience verification. Empty = accept
+      # any Google-issued ID token (dev only); set GOOGLE_CLIENT_ID before production.
+      client-id: ${GOOGLE_CLIENT_ID:}
+  kafka:
+    # Partition count for user-telemetry, declared by KafkaTopicConfig and reused as the
+    # telemetry listener's concurrency (1 consumer thread per partition is the ceiling).
+    telemetry-partitions: ${APP_KAFKA_TELEMETRY_PARTITIONS:3}
+
+spring:
+  application:
+    name: pet_social
+
+  # PostgreSQL Configuration — credentials come from the environment; the defaults are
+  # for local dev only. Set DB_URL / DB_USERNAME / DB_PASSWORD in every real deployment.
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/pet_social_db}
+    username: ${DB_USERNAME:admin}
+    password: ${DB_PASSWORD:rootpassword}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 20 # starting point; tune against the Sprint 4 load test
+      minimum-idle: 5
+
+  jpa:
+    hibernate:
+      ddl-auto: update # Automatically updates DB schema based on your Java entities
+    # Console SQL logging is synchronous and measurably caps throughput under load.
+    # Off by default; set SHOW_SQL=true when debugging queries locally.
+    show-sql: ${SHOW_SQL:false}
+    # Don't hold a DB connection for the whole request (Redis calls + JSON serialization
+    # included) — services fetch-join what they need up front.
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: ${SHOW_SQL:false}
+        jdbc:
+          batch_size: 50 # requires SEQUENCE-based ids (set on all entities) - IDENTITY disables batching
+        order_inserts: true
+        order_updates: true
+
+  # Redis Configuration
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      lettuce:
+        pool:
+          # Must exceed the Kafka listener concurrency (8) so each consumer thread can hold
+          # its own connection during executePipelined() instead of serializing on a shared one.
+          max-active: 16
+          max-idle: 16
+          min-idle: 4
+          max-wait: 1000ms
+
+  # Kafka Configuration
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      # Producers already serialize payloads to JSON strings themselves (ObjectMapper);
+      # JsonSerializer was re-serializing that string (quote+escape every byte). Plain
+      # StringSerializer removes the double serialization on both topics.
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      # Small batching window + compression: ~free throughput for telemetry bursts.
+      properties:
+        linger.ms: 5
+        batch.size: 32768
+        compression.type: lz4
+    listener:
+      # Single @KafkaListener in the app (TelemetryConsumerService) is written for batch mode -
+      # with the user-telemetry topic at 1 partition, batching is how we maximize throughput
+      # on a single partition before scaling out partitions/brokers.
+      type: batch
+    consumer:
+      group-id: dispatch-group
+      auto-offset-reset: earliest
+      max-poll-records: 1000
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # Consumers parse JSON themselves (ObjectMapper.readValue) — mirror of the producer
+      # change above; also removes the trusted.packages="*" deserialization smell.
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
