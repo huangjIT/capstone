@@ -45,6 +45,12 @@ public class PartnerInvitation {
     @Column(name = "invite_time", nullable = false)
     private String time; // display string, e.g. "9:00 AM"
 
+    // date+time parsed into a real instant at write time — the display strings above stay the
+    // source of truth for rendering, this is purely so WALK expiry can compare against "now".
+    // Null on rows saved before this column existed, or if the strings didn't parse.
+    @Column(name = "scheduled_at")
+    private LocalDateTime scheduledAt;
+
     @Column(length = 1000)
     private String message;
 
@@ -58,11 +64,23 @@ public class PartnerInvitation {
     @Column(name = "host_pet_ids")
     private String hostPetIds;
 
+    // Pipe-separated photo URLs the host attached (DATE: up to 5)
+    @Column(name = "image_urls", length = 2500)
+    private String imageUrls;
+
     @Column
     private Double latitude;
 
     @Column
     private Double longitude;
+
+    // WALK only: the route's destination, so browsers can see the actual road route
+    // (not just the start pin) via RouteMapPicker's routing service.
+    @Column(name = "end_latitude")
+    private Double endLatitude;
+
+    @Column(name = "end_longitude")
+    private Double endLongitude;
 
     @Column(nullable = false)
     private String status = STATUS_ACTIVE;
@@ -115,6 +133,9 @@ public class PartnerInvitation {
     public String getTime() { return time; }
     public void setTime(String time) { this.time = time; }
 
+    public LocalDateTime getScheduledAt() { return scheduledAt; }
+    public void setScheduledAt(LocalDateTime scheduledAt) { this.scheduledAt = scheduledAt; }
+
     public String getMessage() { return message; }
     public void setMessage(String message) { this.message = message; }
 
@@ -127,11 +148,20 @@ public class PartnerInvitation {
     public String getHostPetIds() { return hostPetIds; }
     public void setHostPetIds(String hostPetIds) { this.hostPetIds = hostPetIds; }
 
+    public String getImageUrls() { return imageUrls; }
+    public void setImageUrls(String imageUrls) { this.imageUrls = imageUrls; }
+
     public Double getLatitude() { return latitude; }
     public void setLatitude(Double latitude) { this.latitude = latitude; }
 
     public Double getLongitude() { return longitude; }
     public void setLongitude(Double longitude) { this.longitude = longitude; }
+
+    public Double getEndLatitude() { return endLatitude; }
+    public void setEndLatitude(Double endLatitude) { this.endLatitude = endLatitude; }
+
+    public Double getEndLongitude() { return endLongitude; }
+    public void setEndLongitude(Double endLongitude) { this.endLongitude = endLongitude; }
 
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }

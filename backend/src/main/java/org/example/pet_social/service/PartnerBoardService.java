@@ -3,6 +3,8 @@ package org.example.pet_social.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.example.pet_social.dto.AppEvent;
+import org.example.pet_social.dto.CompletedDateResponse;
+import org.example.pet_social.dto.CompletedWalkResponse;
 import org.example.pet_social.dto.DateFeedItemResponse;
 import org.example.pet_social.dto.DateInvitationResponse;
 import org.example.pet_social.dto.FeedCard;
@@ -28,6 +30,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -58,7 +63,8 @@ public class PartnerBoardService {
 
     public record InvitationBody(String route, String location, String date, String time, String message,
                                  Integer durationMinutes, Integer maxSpots, List<Long> hostPetIds,
-                                 Long hostPetId, Double latitude, Double longitude) {}
+                                 Long hostPetId, Double latitude, Double longitude, List<String> imageUrls,
+                                 Double endLatitude, Double endLongitude) {}
 
     public record RequestSummary(String id, String invitationId, String status) {}
 
@@ -122,20 +128,23 @@ public class PartnerBoardService {
                     mine == null ? null : String.valueOf(mine.getId()),
                     mine == null ? null : mine.getStatus(),
                     mine == null ? 0 : unreadByRequest.getOrDefault(mine.getId(), 0L).intValue(),
-                    card.pets(), card.latitude(), card.longitude()));
+                    card.pets(), card.latitude(), card.longitude(),
+                    card.endLatitude(), card.endLongitude()));
         }
         return out;
     }
 
-    public List<DateFeedItemResponse> dateFeed(Long userId, Double lat, Double lng) {
+    public List<DateFeedItemResponse> dateFeed(Long userId, Double lat, Double lng,
+                                               String species, String age, String vaccine, String breed) {
         Map<Long, PartnerRequest> myRequests = myRequestsByInvitation(TYPE_DATE, userId);
         Map<Long, Long> unreadByRequest = countMap(
                 messageRepository.countUnreadGroupedByContextId(userId, contextTypeFor(TYPE_DATE)));
         List<DateFeedItemResponse> out = new ArrayList<>();
         for (FeedCard card : personalizableFeed(TYPE_DATE, userId)) {
+            FeedPetInfo pet = card.pets().isEmpty() ? null : card.pets().get(0);
+            if (!matchesDateFilters(pet, species, age, vaccine, breed)) continue;
             PartnerRequest mine = myRequests.get(card.id());
             Double distanceKm = distanceKm(lat, lng, card.latitude(), card.longitude());
-            FeedPetInfo pet = card.pets().isEmpty() ? null : card.pets().get(0);
             out.add(new DateFeedItemResponse(
                     String.valueOf(card.id()), String.valueOf(card.hostId()),
                     card.place(), card.date(), card.time(), card.message(),
@@ -153,7 +162,7 @@ public class PartnerBoardService {
                     mine == null ? null : String.valueOf(mine.getId()),
                     mine == null ? null : mine.getStatus(),
                     mine == null ? 0 : unreadByRequest.getOrDefault(mine.getId(), 0L).intValue(),
-                    card.latitude(), card.longitude()));
+                    card.latitude(), card.longitude(), card.imageUrls()));
         }
         return out;
     }
@@ -192,7 +201,8 @@ public class PartnerBoardService {
     }
 
     private List<FeedCard> buildBaseFeed(String type) {
-        List<PartnerInvitation> invitations = invitationRepository.findByTypeAndStatusOrderByCreatedAtDesc(type, STATUS_ACTIVE);
+        List<PartnerInvitation> invitations = invitationRepository.findByTypeAndStatusOrderByCreatedAtDesc(type, STATUS_ACTIVE)
+                .stream().filter(inv -> !isExpiredInvitation(inv)).toList();
         Map<Long, Long> accepted = countMap(requestRepository.countAcceptedByInvitation(ids(invitations)));
         Map<Long, Pet> petsById = loadPets(invitations);
 
@@ -209,7 +219,8 @@ public class PartnerBoardService {
             cards.add(new FeedCard(inv.getId(), host.getId(), host.getName(), host.getAvatarUrl(),
                     inv.getPlace(), inv.getDate(), inv.getTime(), inv.getMessage(),
                     inv.getDurationMinutes(), inv.getMaxSpots(), spotsLeft,
-                    inv.getLatitude(), inv.getLongitude(), pets));
+                    inv.getLatitude(), inv.getLongitude(), pets, imageUrls(inv),
+                    inv.getEndLatitude(), inv.getEndLongitude()));
         }
         return cards;
     }
@@ -218,7 +229,8 @@ public class PartnerBoardService {
 
     public List<WalkInvitationResponse> myWalkInvitations(Long userId) {
         List<PartnerInvitation> mine = invitationRepository
-                .findByTypeAndHost_IdAndStatusOrderByCreatedAtDesc(TYPE_WALK, userId, STATUS_ACTIVE);
+                .findByTypeAndHost_IdAndStatusOrderByCreatedAtDesc(TYPE_WALK, userId, STATUS_ACTIVE)
+                .stream().filter(inv -> !isExpiredInvitation(inv)).toList();
         Map<Long, Long> pending = countMap(requestRepository.countPendingByInvitation(ids(mine)));
         Map<Long, Long> accepted = countMap(requestRepository.countAcceptedByInvitation(ids(mine)));
         return mine.stream().map(inv -> toWalkInvitation(inv, pending, accepted)).toList();
@@ -226,10 +238,117 @@ public class PartnerBoardService {
 
     public List<DateInvitationResponse> myDateInvitations(Long userId) {
         List<PartnerInvitation> mine = invitationRepository
-                .findByTypeAndHost_IdAndStatusOrderByCreatedAtDesc(TYPE_DATE, userId, STATUS_ACTIVE);
+                .findByTypeAndHost_IdAndStatusOrderByCreatedAtDesc(TYPE_DATE, userId, STATUS_ACTIVE)
+                .stream().filter(inv -> !isExpiredInvitation(inv)).toList();
         Map<Long, Long> pending = countMap(requestRepository.countPendingByInvitation(ids(mine)));
         Map<Long, Pet> petsById = loadPets(mine);
         return mine.stream().map(inv -> toDateInvitation(inv, pending, petsById)).toList();
+    }
+
+    /**
+     * Walks whose time has passed: everything I hosted (always, even with zero
+     * participants) plus everything I was accepted into. Newest-completed first.
+     */
+    public List<CompletedWalkResponse> completedWalks(Long userId) {
+        record Entry(LocalDateTime at, CompletedWalkResponse resp) {}
+        List<Entry> entries = new ArrayList<>();
+
+        List<PartnerInvitation> hosted = invitationRepository
+                .findByTypeAndHost_IdAndStatusOrderByCreatedAtDesc(TYPE_WALK, userId, STATUS_ACTIVE)
+                .stream().filter(PartnerBoardService::isExpiredInvitation).toList();
+        if (!hosted.isEmpty()) {
+            List<PartnerRequest> hostRequests = requestRepository
+                    .findByTypeAndInvitation_Host_IdOrderByCreatedAtDesc(TYPE_WALK, userId);
+            Map<Long, List<PartnerRequest>> acceptedByInvitation = new HashMap<>();
+            for (PartnerRequest r : hostRequests) {
+                if (PartnerRequest.STATUS_ACCEPTED.equals(r.getStatus())) {
+                    acceptedByInvitation.computeIfAbsent(r.getInvitationId(), k -> new ArrayList<>()).add(r);
+                }
+            }
+            Map<Long, Pet> firstPetByRequester = firstPetByOwner(
+                    hostRequests.stream().map(PartnerRequest::getRequesterId).distinct().toList());
+            for (PartnerInvitation inv : hosted) {
+                List<CompletedWalkResponse.Participant> participants = acceptedByInvitation
+                        .getOrDefault(inv.getId(), List.of()).stream()
+                        .map(r -> {
+                            User requester = r.getRequester();
+                            Pet pet = firstPetByRequester.get(requester.getId());
+                            return new CompletedWalkResponse.Participant(
+                                    String.valueOf(requester.getId()), requester.getName(), requester.getAvatarUrl(),
+                                    pet == null ? null : pet.getName(), pet == null ? null : pet.getProfilePhotoUrl());
+                        })
+                        .toList();
+                entries.add(new Entry(inv.getScheduledAt(), new CompletedWalkResponse(
+                        String.valueOf(inv.getId()), inv.getPlace(), inv.getDate(), inv.getTime(),
+                        inv.getDurationMinutes(), "HOST", null, null, participants)));
+            }
+        }
+
+        for (PartnerRequest r : requestRepository.findByTypeAndRequester_IdOrderByCreatedAtDesc(TYPE_WALK, userId)) {
+            if (!PartnerRequest.STATUS_ACCEPTED.equals(r.getStatus())) continue;
+            PartnerInvitation inv = r.getInvitation();
+            if (!isExpiredInvitation(inv)) continue;
+            User host = inv.getHost();
+            entries.add(new Entry(inv.getScheduledAt(), new CompletedWalkResponse(
+                    String.valueOf(inv.getId()), inv.getPlace(), inv.getDate(), inv.getTime(),
+                    inv.getDurationMinutes(), "PARTICIPANT", host.getName(), host.getAvatarUrl(), List.of())));
+        }
+
+        entries.sort(Comparator.comparing(Entry::at, Comparator.nullsLast(Comparator.reverseOrder())));
+        return entries.stream().map(Entry::resp).toList();
+    }
+
+    /**
+     * Blind dates whose time has passed: everything I hosted (always, even with
+     * zero requesters) plus every date I was accepted into. Newest-completed first.
+     */
+    public List<CompletedDateResponse> completedDates(Long userId) {
+        record Entry(LocalDateTime at, CompletedDateResponse resp) {}
+        List<Entry> entries = new ArrayList<>();
+
+        List<PartnerInvitation> hosted = invitationRepository
+                .findByTypeAndHost_IdAndStatusOrderByCreatedAtDesc(TYPE_DATE, userId, STATUS_ACTIVE)
+                .stream().filter(PartnerBoardService::isExpiredInvitation).toList();
+        if (!hosted.isEmpty()) {
+            List<PartnerRequest> hostRequests = requestRepository
+                    .findByTypeAndInvitation_Host_IdOrderByCreatedAtDesc(TYPE_DATE, userId);
+            Map<Long, List<PartnerRequest>> acceptedByInvitation = new HashMap<>();
+            for (PartnerRequest r : hostRequests) {
+                if (PartnerRequest.STATUS_ACCEPTED.equals(r.getStatus())) {
+                    acceptedByInvitation.computeIfAbsent(r.getInvitationId(), k -> new ArrayList<>()).add(r);
+                }
+            }
+            Map<Long, Pet> firstPetByRequester = firstPetByOwner(
+                    hostRequests.stream().map(PartnerRequest::getRequesterId).distinct().toList());
+            for (PartnerInvitation inv : hosted) {
+                List<CompletedDateResponse.Participant> participants = acceptedByInvitation
+                        .getOrDefault(inv.getId(), List.of()).stream()
+                        .map(r -> {
+                            User requester = r.getRequester();
+                            Pet pet = firstPetByRequester.get(requester.getId());
+                            return new CompletedDateResponse.Participant(
+                                    String.valueOf(requester.getId()), requester.getName(), requester.getAvatarUrl(),
+                                    pet == null ? null : pet.getName(), pet == null ? null : pet.getProfilePhotoUrl());
+                        })
+                        .toList();
+                entries.add(new Entry(inv.getScheduledAt(), new CompletedDateResponse(
+                        String.valueOf(inv.getId()), inv.getPlace(), inv.getDate(), inv.getTime(),
+                        "HOST", null, null, participants)));
+            }
+        }
+
+        for (PartnerRequest r : requestRepository.findByTypeAndRequester_IdOrderByCreatedAtDesc(TYPE_DATE, userId)) {
+            if (!PartnerRequest.STATUS_ACCEPTED.equals(r.getStatus())) continue;
+            PartnerInvitation inv = r.getInvitation();
+            if (!isExpiredInvitation(inv)) continue;
+            User host = inv.getHost();
+            entries.add(new Entry(inv.getScheduledAt(), new CompletedDateResponse(
+                    String.valueOf(inv.getId()), inv.getPlace(), inv.getDate(), inv.getTime(),
+                    "PARTICIPANT", host.getName(), host.getAvatarUrl(), List.of())));
+        }
+
+        entries.sort(Comparator.comparing(Entry::at, Comparator.nullsLast(Comparator.reverseOrder())));
+        return entries.stream().map(Entry::resp).toList();
     }
 
     // ------------------------------------------------------ invitation CRUD
@@ -295,6 +414,10 @@ public class PartnerBoardService {
         if (!STATUS_ACTIVE.equals(inv.getStatus())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invitation is no longer active");
         }
+        if (isExpiredInvitation(inv)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "this " + (TYPE_WALK.equals(type) ? "walk" : "date") + " has already happened");
+        }
         if (inv.getHostId().equals(userId)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "cannot request your own invitation");
         }
@@ -338,15 +461,20 @@ public class PartnerBoardService {
                 .toList();
     }
 
+    @Transactional
     public RequestSummary updateRequestStatus(String type, Long userId, Long requestId, String status) {
         String normalized = status == null ? "" : status.toUpperCase(Locale.ROOT);
-        if (!List.of(PartnerRequest.STATUS_ACCEPTED, PartnerRequest.STATUS_REJECTED, PartnerRequest.STATUS_BLOCKED)
-                .contains(normalized)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "status must be ACCEPTED, REJECTED or BLOCKED");
-        }
         PartnerRequest request = requestRepository.findById(requestId)
                 .filter(r -> type.equals(r.getType()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "request not found"));
+        // PENDING is only a valid target as an "unblock" — reopening a request the host
+        // themselves blocked, never a generic reset of an accepted/rejected request.
+        boolean isUnblock = PartnerRequest.STATUS_PENDING.equals(normalized)
+                && PartnerRequest.STATUS_BLOCKED.equals(request.getStatus());
+        if (!isUnblock && !List.of(PartnerRequest.STATUS_ACCEPTED, PartnerRequest.STATUS_REJECTED, PartnerRequest.STATUS_BLOCKED)
+                .contains(normalized)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "status must be ACCEPTED, REJECTED or BLOCKED");
+        }
         PartnerInvitation inv = request.getInvitation();
         if (!inv.getHostId().equals(userId)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "only the host can resolve a request");
@@ -360,9 +488,10 @@ public class PartnerBoardService {
         request.setStatus(normalized);
         requestRepository.save(request);
         invalidateFeed(type); // spotsLeft may have changed
+        String verb = isUnblock ? "reopened" : normalized.toLowerCase(Locale.ROOT);
         appEventsProducer.publish(new AppEvent(AppEvent.REQUEST_STATUS_CHANGED, userId, request.getRequesterId(),
                 "PARTNER_REQUEST", request.getId(),
-                "Your " + (TYPE_WALK.equals(type) ? "walk" : "date") + " request was " + normalized.toLowerCase(Locale.ROOT)
+                "Your " + (TYPE_WALK.equals(type) ? "walk" : "date") + " request was " + verb
                         + ": " + inv.getPlace()));
         return new RequestSummary(String.valueOf(request.getId()),
                 String.valueOf(request.getInvitationId()), request.getStatus());
@@ -370,6 +499,7 @@ public class PartnerBoardService {
 
     // --------------------------------------------------------- notifications
 
+    @Transactional(readOnly = true)
     public List<PartnerNotificationResponse> notifications(String type, Long userId) {
         String uiType = TYPE_WALK.equals(type) ? "walk_request" : "date_request";
         Map<Long, Long> unreadByRequest = countMap(
@@ -431,12 +561,22 @@ public class PartnerBoardService {
         return out;
     }
 
-    /** Both request participants, for message-thread authorization: [hostId, requesterId]. */
+    /**
+     * Both request participants, for message-thread authorization: [hostId, requesterId].
+     * Force-initializes the lazy invitation while the session is open — the caller
+     * (MessageController) reads pr.getInvitation().getHostId() after this method returns,
+     * by which point open-in-view=false has already closed the session.
+     */
+    @Transactional(readOnly = true)
     public PartnerRequest requestForThread(String contextType, Long requestId) {
         String type = "WALK_REQUEST".equals(contextType) ? TYPE_WALK : TYPE_DATE;
-        return requestRepository.findById(requestId)
+        PartnerRequest pr = requestRepository.findById(requestId)
                 .filter(r -> type.equals(r.getType()))
                 .orElse(null);
+        if (pr != null) {
+            pr.getInvitation().getHostId();
+        }
+        return pr;
     }
 
     // ---------------------------------------------------------------- helpers
@@ -454,6 +594,10 @@ public class PartnerBoardService {
         inv.setMessage(body.message());
         inv.setLatitude(body.latitude());
         inv.setLongitude(body.longitude());
+        inv.setEndLatitude(body.endLatitude());
+        inv.setEndLongitude(body.endLongitude());
+        inv.setImageUrls(imageCsv(body.imageUrls()));
+        inv.setScheduledAt(parseScheduledAt(body.date(), body.time()));
         return inv;
     }
 
@@ -464,6 +608,43 @@ public class PartnerBoardService {
         inv.setMessage(body.message());
         if (body.latitude() != null) inv.setLatitude(body.latitude());
         if (body.longitude() != null) inv.setLongitude(body.longitude());
+        if (body.endLatitude() != null) inv.setEndLatitude(body.endLatitude());
+        if (body.endLongitude() != null) inv.setEndLongitude(body.endLongitude());
+        if (body.imageUrls() != null) inv.setImageUrls(imageCsv(body.imageUrls()));
+        if (body.date() != null || body.time() != null) {
+            inv.setScheduledAt(parseScheduledAt(inv.getDate(), inv.getTime()));
+        }
+    }
+
+    // Matches exactly what the app's formatDate()/formatTime() produce, e.g. "Mon, Jul 5, 2026" + "9:00 AM".
+    private static final DateTimeFormatter SCHEDULED_AT_FORMAT =
+            DateTimeFormatter.ofPattern("EEE, MMM d, yyyy h:mm a", Locale.ENGLISH);
+
+    /** Best-effort parse of the display date+time strings into a real instant; null if unparseable. */
+    private static LocalDateTime parseScheduledAt(String date, String time) {
+        if (date == null || time == null) return null;
+        try {
+            return LocalDateTime.parse(date + " " + time, SCHEDULED_AT_FORMAT);
+        } catch (DateTimeParseException e) {
+            return null;
+        }
+    }
+
+    /** An invitation (walk or date) whose scheduled time has passed. */
+    private static boolean isExpiredInvitation(PartnerInvitation inv) {
+        return inv.getScheduledAt() != null && inv.getScheduledAt().isBefore(LocalDateTime.now());
+    }
+
+    /** Pipe-joined image URLs, capped to 5 — mirrors ownedPetCsv's CSV-column pattern. */
+    private static String imageCsv(List<String> urls) {
+        if (urls == null || urls.isEmpty()) return null;
+        List<String> capped = urls.stream().filter(u -> u != null && !u.isBlank()).limit(5).toList();
+        return capped.isEmpty() ? null : String.join("|", capped);
+    }
+
+    private static List<String> imageUrls(PartnerInvitation inv) {
+        if (inv.getImageUrls() == null || inv.getImageUrls().isBlank()) return List.of();
+        return List.of(inv.getImageUrls().split("\\|"));
     }
 
     private PartnerInvitation ownedInvitation(String type, Long userId, Long id) {
@@ -515,7 +696,8 @@ public class PartnerBoardService {
         return new WalkInvitationResponse(String.valueOf(inv.getId()), inv.getPlace(), inv.getDate(), inv.getTime(),
                 inv.getDurationMinutes(), inv.getMaxSpots(), spotsLeft, inv.getMessage(), inv.getStatus(),
                 petIds(inv).stream().map(String::valueOf).toList(),
-                pending.getOrDefault(inv.getId(), 0L).intValue());
+                pending.getOrDefault(inv.getId(), 0L).intValue(),
+                inv.getLatitude(), inv.getLongitude(), inv.getEndLatitude(), inv.getEndLongitude());
     }
 
     private DateInvitationResponse toDateInvitation(PartnerInvitation inv, Map<Long, Long> pending, Map<Long, Pet> petsById) {
@@ -529,7 +711,8 @@ public class PartnerBoardService {
                 pet == null ? null : pet.getSpecies(),
                 pet == null ? null : pet.getBreed(),
                 pet == null ? null : pet.getProfilePhotoUrl(),
-                pet == null ? null : UiFormat.age(pet.getDateOfBirth()));
+                pet == null ? null : UiFormat.age(pet.getDateOfBirth()),
+                imageUrls(inv));
     }
 
     private static FeedPetInfo petInfo(Pet pet) {
@@ -575,6 +758,51 @@ public class PartnerBoardService {
                     (a, b) -> a.getId() <= b.getId() ? a : b);
         }
         return byOwner;
+    }
+
+    /** Applies the Pet Blind Date board's Species/Age/Vaccine/Breed filters against a card's first pet. */
+    private static boolean matchesDateFilters(FeedPetInfo pet, String species, String age, String vaccine, String breed) {
+        if (pet == null) return species == null && age == null && vaccine == null && breed == null;
+        if (species != null && !species.isBlank()) {
+            String s = pet.petSpecies() == null ? "" : pet.petSpecies();
+            boolean isDog = "DOG".equalsIgnoreCase(s);
+            boolean isCat = "CAT".equalsIgnoreCase(s);
+            boolean matches = switch (species) {
+                case "Dog" -> isDog;
+                case "Cat" -> isCat;
+                case "Other" -> !isDog && !isCat;
+                default -> true;
+            };
+            if (!matches) return false;
+        }
+        if (vaccine != null && !vaccine.isBlank()) {
+            boolean vaccinated = Boolean.TRUE.equals(pet.petIsVaccinated());
+            if ("Yes".equals(vaccine) && !vaccinated) return false;
+            if ("No".equals(vaccine) && vaccinated) return false;
+        }
+        if (breed != null && !breed.isBlank()) {
+            if (pet.petBreed() == null || !pet.petBreed().equalsIgnoreCase(breed)) return false;
+        }
+        if (age != null && !age.isBlank() && !ageBucket(pet.petAge()).equals(age)) return false;
+        return true;
+    }
+
+    /** Buckets a formatted pet age ("2y", "5mo") into the board's filter ranges. */
+    private static String ageBucket(String petAge) {
+        if (petAge == null || petAge.isBlank()) return "";
+        if (petAge.endsWith("mo")) return "0-1y";
+        if (petAge.endsWith("y")) {
+            try {
+                int years = Integer.parseInt(petAge.substring(0, petAge.length() - 1));
+                if (years <= 1) return "0-1y";
+                if (years <= 3) return "1-3y";
+                if (years <= 7) return "3-7y";
+                return "7y+";
+            } catch (NumberFormatException ignored) {
+                return "";
+            }
+        }
+        return "";
     }
 
     private static Map<Long, Long> countMap(List<Object[]> rows) {

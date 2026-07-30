@@ -36,6 +36,7 @@ export interface DateInvitation {
   petBreed?: string;
   petProfilePhotoUrl?: string;
   petAge?: string;
+  imageUrls?: string[];
 }
 
 export interface DateFeedItem {
@@ -61,6 +62,7 @@ export interface DateFeedItem {
   myRequestId?: string;
   myRequestStatus?: string;
   unreadMessageCount?: number;
+  imageUrls?: string[];
 }
 
 interface PetBlindDateScreenProps {
@@ -209,9 +211,14 @@ export const PetBlindDateScreen: React.FC<PetBlindDateScreenProps> = ({ navigati
       <Animated.View style={[styles.myDatesSection, { maxHeight: datesMaxHeight, opacity: datesAnim, overflow: 'hidden' }]}>
         <View style={styles.myDatesHeader}>
           <Text style={styles.myDatesTitle}>My Dates</Text>
-          <TouchableOpacity onPress={() => navigation.navigate('PostDateInvitation')}>
-            <Text style={styles.manageText}>+ Post Date →</Text>
-          </TouchableOpacity>
+          <View style={styles.myDatesHeaderActions}>
+            <TouchableOpacity style={styles.completedBtn} onPress={() => navigation.navigate('CompletedDates')}>
+              <Text style={styles.completedText}>✓ Completed</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => navigation.navigate('PostDateInvitation')}>
+              <Text style={styles.manageText}>+ Post Date →</Text>
+            </TouchableOpacity>
+          </View>
         </View>
         <ScrollView
           horizontal
@@ -373,6 +380,16 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   myDatesTitle: { fontSize: 15, fontWeight: '700', color: COLORS.text },
+  myDatesHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  completedBtn: {
+    backgroundColor: COLORS.bg,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 100,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  completedText: { color: COLORS.textSub, fontSize: 12, fontWeight: '700' },
   manageText: { fontSize: 13, color: COLORS.purple, fontWeight: '600' },
   myDatesScroll: { paddingHorizontal: 16, paddingBottom: 14, gap: 10 },
   dateCard: {

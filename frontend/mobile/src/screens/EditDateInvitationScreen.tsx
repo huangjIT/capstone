@@ -16,8 +16,13 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import * as Location from 'expo-location';
+import * as ImagePicker from 'expo-image-picker';
 import { COLORS } from '../constants/colors';
 import { apiPut, apiDelete, apiGet } from '../utils/api';
+import { uploadImage } from '../utils/uploadImage';
+import { ImageViewerModal } from '../components/ImageViewerModal';
+
+const MAX_PHOTOS = 5;
 
 interface Pet {
   id: string;
@@ -57,6 +62,9 @@ export const EditDateInvitationScreen: React.FC<EditDateInvitationScreenProps> =
   const [saving, setSaving] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
   const [confirmVisible, setConfirmVisible] = useState(false);
+  const [images, setImages] = useState<string[]>(invitation?.imageUrls ?? []);
+  const [viewerVisible, setViewerVisible] = useState(false);
+  const [viewerIndex, setViewerIndex] = useState(0);
   const scaleAnim = useRef(new Animated.Value(0.8)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
 
@@ -105,11 +113,42 @@ export const EditDateInvitationScreen: React.FC<EditDateInvitationScreenProps> =
     }
   };
 
+  const pickImages = async () => {
+    const remaining = MAX_PHOTOS - images.length;
+    if (remaining <= 0) return;
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Please allow photo library access in Settings.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.8,
+      allowsMultipleSelection: true,
+      selectionLimit: remaining,
+    });
+    if (!result.canceled) {
+      setImages(prev => [...prev, ...result.assets.map(a => a.uri)].slice(0, MAX_PHOTOS));
+    }
+  };
+
+  const removeImage = (index: number) => {
+    setImages(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const openViewer = (index: number) => {
+    setViewerIndex(index);
+    setViewerVisible(true);
+  };
+
   const handleSave = async () => {
     if (!selectedPetId) { Alert.alert('Validation', 'Please select the pet going on the date.'); return; }
     if (!location.trim()) { Alert.alert('Validation', 'Please set a meeting location.'); return; }
     try {
       setSaving(true);
+      const imageUrls = await Promise.all(
+        images.map(uri => (uri.startsWith('http') ? uri : uploadImage(uri, 'dates')))
+      );
       await apiPut(`/api/date/invitations/${invitation.id}`, {
         hostPetId: selectedPetId,
         location: location.trim(),
@@ -117,6 +156,7 @@ export const EditDateInvitationScreen: React.FC<EditDateInvitationScreenProps> =
         date: selectedDate ? formatDate(selectedDate) : (invitation?.date || ''),
         time: selectedTime ? formatTime(selectedTime) : (invitation?.time || ''),
         message: message.trim() || undefined,
+        imageUrls,
       });
       navigation.goBack();
     } catch (e: any) {
@@ -258,6 +298,33 @@ export const EditDateInvitationScreen: React.FC<EditDateInvitationScreenProps> =
             </TouchableOpacity>
           </View>
 
+          {/* Photos */}
+          <View style={styles.fieldGroup}>
+            <Text style={styles.fieldLabel}>📸 Photos (optional, up to {MAX_PHOTOS})</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.photoScrollContent}
+            >
+              {images.map((uri, i) => (
+                <View key={uri + i} style={styles.photoThumbWrap}>
+                  <TouchableOpacity onPress={() => openViewer(i)} activeOpacity={0.85}>
+                    <Image source={{ uri }} style={styles.photoThumb} />
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.photoRemoveBtn} onPress={() => removeImage(i)} hitSlop={8}>
+                    <Text style={styles.photoRemoveText}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+              {images.length < MAX_PHOTOS && (
+                <TouchableOpacity style={styles.addPhotoTile} onPress={pickImages} activeOpacity={0.8}>
+                  <Text style={styles.addPhotoIcon}>+</Text>
+                  <Text style={styles.addPhotoText}>Add Photo</Text>
+                </TouchableOpacity>
+              )}
+            </ScrollView>
+          </View>
+
           {/* Message */}
           <View style={styles.fieldGroup}>
             <Text style={styles.fieldLabel}>💬 Message (optional)</Text>
@@ -294,6 +361,13 @@ export const EditDateInvitationScreen: React.FC<EditDateInvitationScreenProps> =
             : <Text style={styles.ctaText}>💾 Save Changes</Text>}
         </TouchableOpacity>
       </View>
+
+      <ImageViewerModal
+        visible={viewerVisible}
+        images={images}
+        initialIndex={viewerIndex}
+        onClose={() => setViewerVisible(false)}
+      />
 
       {/* Withdraw confirmation dialog */}
       <Modal visible={confirmVisible} transparent animationType="none" statusBarTranslucent>
@@ -419,6 +493,37 @@ const styles = StyleSheet.create({
   petChipNameActive: { color: COLORS.purple },
   petChipBreed: { fontSize: 11, color: COLORS.textMuted, marginTop: 1 },
   petChipCheck: { fontSize: 14, color: COLORS.purple, fontWeight: '700' },
+  photoScrollContent: { gap: 10, paddingVertical: 4 },
+  photoThumbWrap: { width: 84, height: 84 },
+  photoThumb: { width: 84, height: 84, borderRadius: 14, backgroundColor: COLORS.card },
+  photoRemoveBtn: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#EF4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: COLORS.bg,
+  },
+  photoRemoveText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
+  addPhotoTile: {
+    width: 84,
+    height: 84,
+    borderRadius: 14,
+    backgroundColor: COLORS.card,
+    borderWidth: 1.5,
+    borderColor: '#DDD6FE',
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  addPhotoIcon: { fontSize: 22, color: COLORS.purple, fontWeight: '300' },
+  addPhotoText: { fontSize: 10, color: COLORS.purple, fontWeight: '600' },
   withdrawBtn: {
     borderRadius: 16,
     paddingVertical: 14,

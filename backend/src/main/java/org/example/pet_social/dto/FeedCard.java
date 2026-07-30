@@ -22,5 +22,8 @@ public record FeedCard(
         int spotsLeft,
         Double latitude,
         Double longitude,
-        List<FeedPetInfo> pets
+        List<FeedPetInfo> pets,
+        List<String> imageUrls,
+        Double endLatitude,
+        Double endLongitude
 ) {}

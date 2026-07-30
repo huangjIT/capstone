@@ -1,5 +1,7 @@
 package org.example.pet_social.dto;
 
+import java.util.List;
+
 /** Blind-date board feed card — 1:1 with the app's DateFeedItem interface. */
 public record DateFeedItemResponse(
         String id,
@@ -25,5 +27,6 @@ public record DateFeedItemResponse(
         String myRequestStatus,
         Integer unreadMessageCount,
         Double latitude,
-        Double longitude
+        Double longitude,
+        List<String> imageUrls
 ) {}

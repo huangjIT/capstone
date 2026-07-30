@@ -1,5 +1,7 @@
 package org.example.pet_social.dto;
 
+import java.util.List;
+
 /** "My Date Invitations" card — 1:1 with the app's DateInvitation interface. */
 public record DateInvitationResponse(
         String id,
@@ -15,5 +17,6 @@ public record DateInvitationResponse(
         String petSpecies,
         String petBreed,
         String petProfilePhotoUrl,
-        String petAge
+        String petAge,
+        List<String> imageUrls
 ) {}
