@@ -15,8 +15,15 @@ services:
     restart: unless-stopped
 
   redis:
-    image: redis/redis-stack:latest
+    # Plain Redis, not redis-stack: the app only uses core commands (GEO, HASH,
+    # STRING, ZSET, SCAN) and never the Stack modules. redis-stack is 1.42 GB and
+    # bundles a GUI this deployment doesn't even publish a port for; alpine is 61 MB.
+    # Local dev keeps redis-stack in docker-compose.yml for the RedisInsight GUI.
+    image: redis:7-alpine
     container_name: pet-social-redis
+    command: redis-server --appendonly yes --maxmemory-policy noeviction
+    volumes:
+      - redis_data:/data
     restart: unless-stopped
 
   kafka:
@@ -69,3 +76,4 @@ services:
 volumes:
   postgres_data:
   kafka_data:
+  redis_data:
