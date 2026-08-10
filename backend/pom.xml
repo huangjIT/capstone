@@ -65,10 +65,14 @@
             <scope>runtime</scope>
         </dependency>
         <!-- Versioned schema migrations. Replaces ddl-auto: update, which silently failed
-             to add NOT NULL columns to populated tables (see THROUGHPUT_OPTIMIZATION_2026-06-16.md). -->
+             to add NOT NULL columns to populated tables (see THROUGHPUT_OPTIMIZATION_2026-06-16.md).
+             spring-boot-flyway carries the auto-configuration: Boot 4 split auto-configs out of
+             spring-boot-autoconfigure into per-technology modules, so flyway-core alone puts the
+             library on the classpath but never runs it: migrations silently don't happen, and
+             ddl-auto: validate then fails on the first table a migration should have created. -->
         <dependency>
-            <groupId>org.flywaydb</groupId>
-            <artifactId>flyway-core</artifactId>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-flyway</artifactId>
         </dependency>
         <dependency>
             <groupId>org.flywaydb</groupId>
