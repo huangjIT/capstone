@@ -10,9 +10,12 @@ import org.springframework.data.geo.Metrics;
 import org.springframework.data.geo.Point;
 import org.springframework.data.redis.connection.RedisGeoCommands;
 import org.springframework.data.redis.core.GeoOperations;
+import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -20,24 +23,30 @@ import java.util.Optional;
 import org.springframework.beans.factory.annotation.Autowired;
 
 /**
- * Walking-partner matching engine (compile-safe first pass).
+ * Walking-partner matching engine.
  * Responsibilities:
  * - search candidates in Redis by radius
  * - load per-user metadata
  * - filter by availability and matching-preferences bitmask
  * - return the nearest valid user
- * We intentionally keep this version simple and readable first.
- * We can optimize metadata batching after the build is green.
+ * Candidate search is bounded (GEOSEARCH COUNT, nearest-first) and metadata is
+ * fetched in one pipelined round-trip per radius — an unbounded search plus one
+ * HGETALL per candidate is O(city population) per request at load-test density.
  */
 @Service
 public class MatchingService {
 
     private static final String GEO_KEY = "users:geo";
     private static final String META_PREFIX = "users:meta:";
-    private static final int MAX_CANDIDATES_PER_RADIUS = 100;
 
     // SLA expansion radii in meters.
     private final List<Double> radiiMeters = List.of(2000.0, 5000.0, 10000.0);
+
+    // Candidate cap per expansion step. Results come back nearest-first, so the cap must
+    // grow with the radius — a wider search with the same cap would return the exact same
+    // nearest members that already failed the filter. Caps bound the worst case at
+    // 50+100+200 metadata reads per request instead of O(city population).
+    private static final List<Integer> CANDIDATE_LIMITS = List.of(50, 100, 200);
 
     private final StringRedisTemplate redis;
     private final GeoOperations<String, String> geoOps;
@@ -62,14 +71,12 @@ public class MatchingService {
     private Optional<Long> findNearestMatchInternal(double latitude, double longitude, long requiredPreferencesMask) {
         Point point = new Point(longitude, latitude);
 
-        // Sorted nearest-first so the first candidate that passes the filters really is the
-        // nearest match, and capped so one request never walks an unbounded geo result set.
-        RedisGeoCommands.GeoRadiusCommandArgs args = RedisGeoCommands.GeoRadiusCommandArgs
-                .newGeoRadiusArgs().sortAscending().limit(MAX_CANDIDATES_PER_RADIUS);
-
-        for (double radiusMeters : radiiMeters) {
-            // Redis geo radius search in kilometers.
-            Circle radius = new Circle(point, new Distance(radiusMeters / 1000.0, Metrics.KILOMETERS));
+        for (int step = 0; step < radiiMeters.size(); step++) {
+            // Redis geo radius search in kilometers, nearest-first and capped.
+            Circle radius = new Circle(point, new Distance(radiiMeters.get(step) / 1000.0, Metrics.KILOMETERS));
+            RedisGeoCommands.GeoRadiusCommandArgs args = RedisGeoCommands.GeoRadiusCommandArgs.newGeoRadiusArgs()
+                    .limit(CANDIDATE_LIMITS.get(step))
+                    .sortAscending();
 
             GeoResults<RedisGeoCommands.GeoLocation<String>> results = geoOps.radius(GEO_KEY, radius, args);
 
@@ -77,16 +84,27 @@ public class MatchingService {
                 continue;
             }
 
+            List<String> candidateIds = new ArrayList<>(results.getContent().size());
             for (GeoResult<RedisGeoCommands.GeoLocation<String>> geoResult : results.getContent()) {
-                String userId = geoResult.getContent().getName();
+                candidateIds.add(geoResult.getContent().getName());
+            }
 
-                // Load runtime metadata for this user from Redis.
-                Map<Object, Object> meta = redis.opsForHash().entries(META_PREFIX + userId);
-                if (meta == null || meta.isEmpty()) {
+            // One pipelined round-trip fetches every candidate's metadata hash; results
+            // come back in candidate (nearest-first) order.
+            List<Object> metas = redis.executePipelined((RedisCallback<Object>) connection -> {
+                for (String id : candidateIds) {
+                    connection.hashCommands().hGetAll((META_PREFIX + id).getBytes(StandardCharsets.UTF_8));
+                }
+                return null;
+            });
+
+            for (int i = 0; i < candidateIds.size(); i++) {
+                Object raw = i < metas.size() ? metas.get(i) : null;
+                if (!(raw instanceof Map<?, ?> meta) || meta.isEmpty()) {
                     continue;
                 }
 
-                boolean active = Boolean.parseBoolean(String.valueOf(meta.getOrDefault("active", "false")));
+                boolean active = Boolean.parseBoolean(String.valueOf(meta.get("active")));
                 long candidatePreferencesMask = parseLong(meta.get("preferences"));
 
                 // Candidate must be active and satisfy all required preference bits.
@@ -96,7 +114,7 @@ public class MatchingService {
                         dashboardService.incrementMatchSuccess();
                     } catch (Exception ignored) {
                     }
-                    return Optional.of(Long.parseLong(userId));
+                    return Optional.of(Long.parseLong(candidateIds.get(i)));
                 }
             }
         }

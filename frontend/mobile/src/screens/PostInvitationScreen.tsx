@@ -43,6 +43,7 @@ export const PostInvitationScreen: React.FC<PostInvitationScreenProps> = ({ navi
   const [selectedPetIds, setSelectedPetIds] = useState<string[]>([]);
   const [route, setRoute] = useState('');
   const [routeCoords, setRouteCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [routeEndCoords, setRouteEndCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [mapVisible, setMapVisible] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedTime, setSelectedTime] = useState<Date | null>(null);
@@ -72,6 +73,7 @@ export const PostInvitationScreen: React.FC<PostInvitationScreenProps> = ({ navi
         maxSpots: parseInt(maxSpots, 10) || 4,
         ...(selectedPetIds.length > 0 ? { hostPetIds: selectedPetIds } : {}),
         ...(routeCoords ? { latitude: routeCoords.latitude, longitude: routeCoords.longitude } : {}),
+        ...(routeEndCoords ? { endLatitude: routeEndCoords.latitude, endLongitude: routeEndCoords.longitude } : {}),
       });
       navigation.goBack();
     } catch (e: any) {
@@ -86,7 +88,12 @@ export const PostInvitationScreen: React.FC<PostInvitationScreenProps> = ({ navi
       <RouteMapPicker
         visible={mapVisible}
         onClose={() => setMapVisible(false)}
-        onConfirm={(r, startCoord) => { setRoute(r); setRouteCoords(startCoord); setMapVisible(false); }}
+        onConfirm={(r, startCoord, endCoord) => {
+          setRoute(r);
+          setRouteCoords(startCoord);
+          setRouteEndCoords(endCoord);
+          setMapVisible(false);
+        }}
       />
       <DateTimePickerModal
         isVisible={datePickerVisible}

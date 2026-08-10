@@ -19,6 +19,9 @@ import { COLORS } from '../constants/colors';
 import { apiPost, apiPut, apiDelete } from '../utils/api';
 import { uploadImage } from '../utils/uploadImage';
 import { MarketItem, categoryEmoji } from './MarketplaceScreen';
+import { ImageViewerModal } from '../components/ImageViewerModal';
+
+const MAX_PHOTOS = 5;
 
 const CATEGORIES = [
   { key: 'TOY', label: '🧸 Toy' },
@@ -45,8 +48,11 @@ export const PostMarketItemScreen: React.FC<PostMarketItemScreenProps> = ({ navi
   const existing: MarketItem | undefined = route?.params?.item;
   const isEdit = !!existing;
 
-  const [photoUri, setPhotoUri] = useState<string | null>(null);
-  const [photoUrl, setPhotoUrl] = useState<string | null>(existing?.photoUrl ?? null);
+  const [images, setImages] = useState<string[]>(
+    existing?.imageUrls?.length ? existing.imageUrls : (existing?.photoUrl ? [existing.photoUrl] : [])
+  );
+  const [viewerVisible, setViewerVisible] = useState(false);
+  const [viewerIndex, setViewerIndex] = useState(0);
   const [name, setName] = useState(existing?.name ?? '');
   const [category, setCategory] = useState(existing?.category ?? 'TOY');
   const [condition, setCondition] = useState(existing?.condition ?? 'GOOD');
@@ -60,6 +66,7 @@ export const PostMarketItemScreen: React.FC<PostMarketItemScreenProps> = ({ navi
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmVisible, setConfirmVisible] = useState(false);
+  const [errors, setErrors] = useState<{ name?: string; price?: string; images?: string; location?: string }>({});
   const scaleAnim = useRef(new Animated.Value(0.8)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
 
@@ -75,7 +82,9 @@ export const PostMarketItemScreen: React.FC<PostMarketItemScreenProps> = ({ navi
     }
   }, [confirmVisible]);
 
-  const pickPhoto = async () => {
+  const pickImages = async () => {
+    const remaining = MAX_PHOTOS - images.length;
+    if (remaining <= 0) return;
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
       Alert.alert('Permission needed', 'Please allow photo library access in Settings.');
@@ -83,11 +92,22 @@ export const PostMarketItemScreen: React.FC<PostMarketItemScreenProps> = ({ navi
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [1, 1],
       quality: 0.8,
+      allowsMultipleSelection: true,
+      selectionLimit: remaining,
     });
-    if (!result.canceled) setPhotoUri(result.assets[0].uri);
+    if (!result.canceled) {
+      setImages(prev => [...prev, ...result.assets.map(a => a.uri)].slice(0, MAX_PHOTOS));
+    }
+  };
+
+  const removeImage = (index: number) => {
+    setImages(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const openViewer = (index: number) => {
+    setViewerIndex(index);
+    setViewerVisible(true);
   };
 
   const useCurrentLocation = async () => {
@@ -117,15 +137,20 @@ export const PostMarketItemScreen: React.FC<PostMarketItemScreenProps> = ({ navi
   };
 
   const handleSave = async () => {
-    if (!name.trim()) { Alert.alert('Validation', 'Item name is required.'); return; }
     const priceNum = parseFloat(price);
-    if (isNaN(priceNum) || priceNum < 0) { Alert.alert('Validation', 'Please enter a valid price.'); return; }
+    const nextErrors: typeof errors = {};
+    if (!name.trim()) nextErrors.name = 'Item name is required.';
+    if (isNaN(priceNum) || priceNum < 0) nextErrors.price = 'Please enter a valid price.';
+    else if (priceNum > 500) nextErrors.price = 'Price must be $500 or less.';
+    if (images.length === 0) nextErrors.images = 'Please add at least one photo of the item.';
+    if (!location.trim()) nextErrors.location = 'Pickup location is required.';
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) return;
     try {
       setSaving(true);
-      let finalPhotoUrl = photoUrl;
-      if (photoUri) {
-        finalPhotoUrl = await uploadImage(photoUri, 'market');
-      }
+      const imageUrls = await Promise.all(
+        images.map(uri => (uri.startsWith('http') ? uri : uploadImage(uri, 'market')))
+      );
       const body = {
         name: name.trim(),
         category,
@@ -135,7 +160,7 @@ export const PostMarketItemScreen: React.FC<PostMarketItemScreenProps> = ({ navi
         description: description.trim() || undefined,
         location: location.trim() || undefined,
         ...(locationCoords ? { latitude: locationCoords.latitude, longitude: locationCoords.longitude } : {}),
-        ...(finalPhotoUrl ? { photoUrl: finalPhotoUrl } : {}),
+        imageUrls,
         ...(isEdit ? { status: isSold ? 'SOLD' : 'ACTIVE' } : {}),
       };
       if (isEdit) {
@@ -164,8 +189,6 @@ export const PostMarketItemScreen: React.FC<PostMarketItemScreenProps> = ({ navi
     }
   };
 
-  const displayPhoto = photoUri ?? photoUrl;
-
   return (
     <View style={styles.container}>
       <ScrollView
@@ -183,23 +206,32 @@ export const PostMarketItemScreen: React.FC<PostMarketItemScreenProps> = ({ navi
         </View>
 
         <View style={styles.formBody}>
-          {/* Photo */}
-          <View style={styles.photoSection}>
-            <TouchableOpacity style={styles.photoBox} onPress={pickPhoto} activeOpacity={0.8}>
-              {displayPhoto ? (
-                <Image source={{ uri: displayPhoto }} style={styles.photoImage} />
-              ) : (
-                <>
-                  <Text style={styles.photoEmoji}>{categoryEmoji(category)}</Text>
-                  <Text style={styles.photoHint}>📷 Add Photo</Text>
-                </>
+          {/* Photos */}
+          <View style={styles.fieldGroup}>
+            <Text style={styles.fieldLabel}>📸 Photos * (up to {MAX_PHOTOS})</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.photoScrollContent}
+            >
+              {images.map((uri, i) => (
+                <View key={uri + i} style={styles.photoThumbWrap}>
+                  <TouchableOpacity onPress={() => openViewer(i)} activeOpacity={0.85}>
+                    <Image source={{ uri }} style={styles.photoThumb} />
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.photoRemoveBtn} onPress={() => removeImage(i)} hitSlop={8}>
+                    <Text style={styles.photoRemoveText}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+              {images.length < MAX_PHOTOS && (
+                <TouchableOpacity style={styles.addPhotoTile} onPress={pickImages} activeOpacity={0.8}>
+                  <Text style={styles.addPhotoIcon}>{images.length === 0 ? categoryEmoji(category) : '+'}</Text>
+                  <Text style={styles.addPhotoText}>Add Photo</Text>
+                </TouchableOpacity>
               )}
-            </TouchableOpacity>
-            {displayPhoto ? (
-              <TouchableOpacity onPress={pickPhoto}>
-                <Text style={styles.changePhotoText}>Change Photo</Text>
-              </TouchableOpacity>
-            ) : null}
+            </ScrollView>
+            {errors.images ? <Text style={styles.errorText}>{errors.images}</Text> : null}
           </View>
 
           {/* Name */}
@@ -208,10 +240,11 @@ export const PostMarketItemScreen: React.FC<PostMarketItemScreenProps> = ({ navi
             <TextInput
               style={styles.input}
               value={name}
-              onChangeText={setName}
+              onChangeText={(t) => { setName(t); if (errors.name) setErrors(e => ({ ...e, name: undefined })); }}
               placeholder="e.g. Pet Carrier Bag"
               placeholderTextColor={COLORS.textMuted}
             />
+            {errors.name ? <Text style={styles.errorText}>{errors.name}</Text> : null}
           </View>
 
           {/* Category */}
@@ -253,15 +286,16 @@ export const PostMarketItemScreen: React.FC<PostMarketItemScreenProps> = ({ navi
           {/* Price & Original Price */}
           <View style={styles.rowFields}>
             <View style={[styles.fieldGroup, { flex: 1 }]}>
-              <Text style={styles.fieldLabel}>💰 Price ($)</Text>
+              <Text style={styles.fieldLabel}>💰 Price ($, max 500)</Text>
               <TextInput
                 style={styles.input}
                 value={price}
-                onChangeText={setPrice}
+                onChangeText={(t) => { setPrice(t); if (errors.price) setErrors(e => ({ ...e, price: undefined })); }}
                 keyboardType="decimal-pad"
                 placeholder="25"
                 placeholderTextColor={COLORS.textMuted}
               />
+              {errors.price ? <Text style={styles.errorText}>{errors.price}</Text> : null}
             </View>
             <View style={styles.rowSpacer} />
             <View style={[styles.fieldGroup, { flex: 1 }]}>
@@ -279,12 +313,16 @@ export const PostMarketItemScreen: React.FC<PostMarketItemScreenProps> = ({ navi
 
           {/* Location */}
           <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>📍 Pickup Location</Text>
+            <Text style={styles.fieldLabel}>📍 Pickup Location *</Text>
             <View style={styles.locationRow}>
               <TextInput
                 style={[styles.input, styles.locationInput]}
                 value={location}
-                onChangeText={(text) => { setLocation(text); setLocationCoords(null); }}
+                onChangeText={(text) => {
+                  setLocation(text);
+                  setLocationCoords(null);
+                  if (errors.location) setErrors(e => ({ ...e, location: undefined }));
+                }}
                 placeholder="e.g. Golden Gate Park entrance"
                 placeholderTextColor={COLORS.textMuted}
               />
@@ -299,6 +337,7 @@ export const PostMarketItemScreen: React.FC<PostMarketItemScreenProps> = ({ navi
                   : <Text style={styles.locateIcon}>📍</Text>}
               </TouchableOpacity>
             </View>
+            {errors.location ? <Text style={styles.errorText}>{errors.location}</Text> : null}
           </View>
 
           {/* Description */}
@@ -374,6 +413,13 @@ export const PostMarketItemScreen: React.FC<PostMarketItemScreenProps> = ({ navi
           </Animated.View>
         </View>
       </Modal>
+
+      <ImageViewerModal
+        visible={viewerVisible}
+        images={images}
+        initialIndex={viewerIndex}
+        onClose={() => setViewerVisible(false)}
+      />
     </View>
   );
 };
@@ -395,26 +441,40 @@ const styles = StyleSheet.create({
   backText: { fontSize: 15, color: COLORS.primary, fontWeight: '600' },
   headerTitle: { fontSize: 17, fontWeight: '700', color: COLORS.text },
   formBody: { padding: 20, gap: 4 },
-  photoSection: { alignItems: 'center', marginBottom: 20, gap: 8 },
-  photoBox: {
-    width: 140,
-    height: 140,
-    borderRadius: 20,
+  photoScrollContent: { gap: 10, paddingVertical: 4 },
+  photoThumbWrap: { width: 84, height: 84 },
+  photoThumb: { width: 84, height: 84, borderRadius: 14, backgroundColor: COLORS.card },
+  photoRemoveBtn: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#EF4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: COLORS.bg,
+  },
+  photoRemoveText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
+  addPhotoTile: {
+    width: 84,
+    height: 84,
+    borderRadius: 14,
     backgroundColor: COLORS.card,
     borderWidth: 1.5,
     borderColor: COLORS.border,
     borderStyle: 'dashed',
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'hidden',
-    gap: 6,
+    gap: 4,
   },
-  photoImage: { width: '100%', height: '100%' },
-  photoEmoji: { fontSize: 44 },
-  photoHint: { fontSize: 12, color: COLORS.textSub, fontWeight: '600' },
-  changePhotoText: { fontSize: 13, color: COLORS.primary, fontWeight: '600' },
+  addPhotoIcon: { fontSize: 22, color: COLORS.primary, fontWeight: '300' },
+  addPhotoText: { fontSize: 10, color: COLORS.primary, fontWeight: '600' },
   fieldGroup: { marginBottom: 16 },
   fieldLabel: { fontSize: 13, fontWeight: '600', color: COLORS.textSub, marginBottom: 8 },
+  errorText: { fontSize: 12, color: '#EF4444', fontWeight: '500', marginTop: 6 },
   input: {
     backgroundColor: COLORS.card,
     borderRadius: 14,

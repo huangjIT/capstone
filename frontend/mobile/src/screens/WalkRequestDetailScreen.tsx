@@ -75,7 +75,8 @@ export const WalkRequestDetailScreen: React.FC<WalkRequestDetailScreenProps> = (
   // Poll every 1 second
   useEffect(() => {
     fetchMessages();
-    intervalRef.current = setInterval(fetchMessages, 1000);
+    // 4s keeps the chat feeling live without hammering the thread endpoint every second.
+    intervalRef.current = setInterval(fetchMessages, 4000);
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
@@ -103,7 +104,7 @@ export const WalkRequestDetailScreen: React.FC<WalkRequestDetailScreenProps> = (
     }
   }, [otherUserId]);
 
-  const handleAction = async (status: 'ACCEPTED' | 'REJECTED' | 'BLOCKED') => {
+  const handleAction = async (status: 'ACCEPTED' | 'REJECTED' | 'BLOCKED' | 'PENDING') => {
     if (!notif?.id) return;
     try {
       await apiPut(`/api/${isDate ? 'date' : 'walk'}/requests/${notif.id}`, { status });
@@ -120,7 +121,16 @@ export const WalkRequestDetailScreen: React.FC<WalkRequestDetailScreenProps> = (
     ]);
   };
 
+  const handleUnblock = () => {
+    Alert.alert('Unblock this user?', 'They will be able to message you again and the request reopens for you to accept or deny.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Unblock', onPress: () => handleAction('PENDING') },
+    ]);
+  };
+
   const isChatClosed = localStatus === 'REJECTED' || localStatus === 'BLOCKED';
+  const PENDING_MESSAGE_LIMIT = 5;
+  const pendingLimitReached = localStatus === 'PENDING' && messages.length >= PENDING_MESSAGE_LIMIT;
 
   const speciesEmoji = notif?.requesterPetSpecies === 'CAT' ? '🐈' : '🐕';
   const tags: string[] = [];
@@ -265,6 +275,15 @@ export const WalkRequestDetailScreen: React.FC<WalkRequestDetailScreenProps> = (
                   <Text style={styles.blockBtnText}>⊘ Block</Text>
                 </TouchableOpacity>
               </View>
+            ) : notif?.direction === 'received' && localStatus === 'BLOCKED' ? (
+              <View style={{ gap: 10 }}>
+                <View style={[styles.statusChip, styles.statusBlocked]}>
+                  <Text style={[styles.statusChipText, styles.statusBlockedText]}>⊘ User Blocked</Text>
+                </View>
+                <TouchableOpacity style={styles.unblockBtn} onPress={handleUnblock}>
+                  <Text style={styles.unblockBtnText}>Unblock User</Text>
+                </TouchableOpacity>
+              </View>
             ) : (
               <View style={[styles.statusChip,
                 localStatus === 'PENDING' ? styles.statusPending
@@ -320,7 +339,14 @@ export const WalkRequestDetailScreen: React.FC<WalkRequestDetailScreenProps> = (
         </View>
       </ScrollView>
 
-      <ChatInputBar onSend={handleSend} disabled={isChatClosed} />
+      {pendingLimitReached && (
+        <View style={styles.limitBanner}>
+          <Text style={styles.limitBannerText}>
+            ⏳ 5-message limit reached while pending — {isSent ? 'wait for the host to accept' : 'accept, deny or wait to keep chatting'}.
+          </Text>
+        </View>
+      )}
+      <ChatInputBar onSend={handleSend} disabled={isChatClosed || pendingLimitReached} />
     </KeyboardAvoidingView>
   );
 };
@@ -422,6 +448,11 @@ const styles = StyleSheet.create({
     paddingVertical: 13, alignItems: 'center', borderWidth: 1.5, borderColor: COLORS.border,
   },
   blockBtnText: { fontSize: 14, fontWeight: '700', color: COLORS.textMuted },
+  unblockBtn: {
+    backgroundColor: COLORS.card, borderRadius: 12,
+    paddingVertical: 13, alignItems: 'center', borderWidth: 1.5, borderColor: COLORS.primary,
+  },
+  unblockBtnText: { fontSize: 14, fontWeight: '700', color: COLORS.primary },
 
   statusChip: { borderRadius: 12, paddingVertical: 13, alignItems: 'center' },
   statusPending: { backgroundColor: '#FFF7ED' },
@@ -445,5 +476,18 @@ const styles = StyleSheet.create({
   emptyChatText: {
     textAlign: 'center', color: COLORS.textMuted, fontSize: 13,
     paddingVertical: 24,
+  },
+  limitBanner: {
+    backgroundColor: '#FFF7ED',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+  },
+  limitBannerText: {
+    fontSize: 12,
+    color: COLORS.primary,
+    fontWeight: '600',
+    textAlign: 'center',
   },
 });

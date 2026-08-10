@@ -373,10 +373,33 @@ Tables are auto-created by Hibernate (`ddl-auto: update`). Demo data: use
 `POST /api/auth/register` + `POST /api/pets` + `POST /api/telemetry/location`,
 or the bulk generators under `/api/test-data/*` (see `backend/README.md`).
 
+---
+
+## 10. Mobile-app v2 endpoints (added 2026-07-13) 🔒 all require Bearer token
+
+Token-derived identity throughout — none of these take a `userId` param. Full
+request/response shapes are specified in `FRONTEND_MOBILE_API_MAPPING.md` (they
+match the TS interfaces in `frontend/mobile/src/screens/*` 1:1).
+
+| Area | Endpoints |
+|---|---|
+| Auth | `POST /api/auth/google` `{idToken}` → `{token,userId,name,email,role}` |
+| Profile | `GET/PUT /api/users/me` · `GET /api/users/me/stats` → `{posts,pets,friends}` |
+| Pets | `GET /api/pets/my` · `POST /api/pets` (token-owned) · `PUT/DELETE /api/pets/{id}` (owner only) |
+| Walk board | `GET /api/walk/invitations/feed?lat&lng` · `GET .../my` · `POST/PUT/DELETE /api/walk/invitations[/{id}]` · `POST /api/walk/requests` `{invitationId}` · `GET /api/walk/requests/my-sent[-unread]` · `PUT /api/walk/requests/{id}` `{status}` (host only) · `GET /api/walk/notifications` |
+| Date board | same shape under `/api/date/*` (single `hostPetId`, `location` instead of `route`) |
+| Market | `GET /api/market/items?category=` · `GET /api/market/items/my` · `POST/PUT/DELETE /api/market/items[/{id}]` (DELETE = withdraw) · `GET /api/market/chats` |
+| Messages | `POST /api/messages` with `walkRequestId`/`dateRequestId`/`marketItemId` alias · `GET /api/messages/walk-request/{id}` · `/date-request/{id}` · `/market-item/{itemId}/{otherUserId}` (mark read on fetch) · `GET /api/messages/unread-counts` → `{WALK,DATE,MARKET}` |
+
+Performance notes: board feeds and unread counts are Redis-cached (30 s / 15 s TTL,
+write-invalidated); notification rows are created asynchronously via the `app-events`
+Kafka topic, so message/request POSTs never wait on notification writes.
+
 ## Known gaps (backend roadmap)
 
-- Endpoints outside `/api/matches` and `/api/messages` don't **enforce** the Bearer
-  token yet — send it everywhere anyway so the app keeps working when enforcement lands.
-- Media upload (pet photos, listing photos, message images) — URL columns exist, no upload endpoint.
+- Legacy endpoints (`/api/pets/nearby|partners|blind-dates`, `/api/invitations`,
+  `/api/marketplace`, `/api/notifications`, …) still accept client-supplied ids for
+  frontend1 compatibility; the mobile app should only use the token-derived endpoints above.
+- Media upload (pet photos, listing photos, message images) — the mobile app uploads to
+  Firebase Storage client-side and sends URL strings; there is still no server-side upload endpoint.
 - Social feed (posts/comments/friendships) has repositories but no endpoints (no Feed tab in the design).
-- Google SSO is not implemented (`/api/auth` is email+password only).

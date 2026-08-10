@@ -72,7 +72,7 @@ export const PetCard: React.FC<PetCardProps> = ({
       {/* Middle: Info */}
       <View style={styles.info}>
         <Text style={styles.nameLine} numberOfLines={1}>
-          {name} · {breed}
+          {breed && breed !== '—' ? `${name} · ${breed}` : name}
         </Text>
         <View style={styles.metaRow}>
           {owner && <Text style={styles.metaText}>👤 {owner}</Text>}

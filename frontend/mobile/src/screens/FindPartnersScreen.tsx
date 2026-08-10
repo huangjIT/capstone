@@ -92,22 +92,17 @@ export const FindPartnersScreen: React.FC<FindPartnersScreenProps> = ({ navigati
 
   const invAnim = useRef(new Animated.Value(1)).current;
   const isInvVisible = useRef(true);
-  const animating = useRef(false);
 
   const showInv = useCallback(() => {
-    if (isInvVisible.current || animating.current) return;
+    if (isInvVisible.current) return;
     isInvVisible.current = true;
-    animating.current = true;
-    Animated.timing(invAnim, { toValue: 1, duration: 200, useNativeDriver: false })
-      .start(() => { animating.current = false; });
+    Animated.timing(invAnim, { toValue: 1, duration: 200, useNativeDriver: false }).start();
   }, [invAnim]);
 
   const hideInv = useCallback(() => {
-    if (!isInvVisible.current || animating.current) return;
+    if (!isInvVisible.current) return;
     isInvVisible.current = false;
-    animating.current = true;
-    Animated.timing(invAnim, { toValue: 0, duration: 200, useNativeDriver: false })
-      .start(() => { animating.current = false; });
+    Animated.timing(invAnim, { toValue: 0, duration: 200, useNativeDriver: false }).start();
   }, [invAnim]);
 
   const handleScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -115,6 +110,13 @@ export const FindPartnersScreen: React.FC<FindPartnersScreenProps> = ({ navigati
     if (y > 50) hideInv();
     else if (y < 20) showInv();
   }, [hideInv, showInv]);
+
+  // Settle to the correct state at the final scroll position (fast flings can
+  // end inside the 20-50px dead zone without a matching scroll event).
+  const handleScrollEnd = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const y = e.nativeEvent.contentOffset.y;
+    if (y < 50) showInv();
+  }, [showInv]);
 
   const invMaxHeight = invAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 220] });
 
@@ -177,13 +179,19 @@ export const FindPartnersScreen: React.FC<FindPartnersScreenProps> = ({ navigati
 
   const onRefresh = useCallback(() => { setRefreshing(true); loadData(); }, [loadData]);
 
+  const matchesTypeFilter = (species?: string) => {
+    if (typeFilter === 'Dogs') return species === 'DOG';
+    if (typeFilter === 'Cats') return species === 'CAT';
+    if (typeFilter === 'Other') return !!species && species !== 'DOG' && species !== 'CAT';
+    return true; // All
+  };
+
   const filtered = feed.filter(item => {
     if (typeFilter === 'All') return true;
-    const target = typeFilter === 'Dogs' ? 'DOG' : 'CAT';
     if (item.pets && item.pets.length > 0) {
-      return item.pets.some(p => p.petSpecies === target);
+      return item.pets.some(p => matchesTypeFilter(p.petSpecies));
     }
-    return item.petSpecies === target;
+    return matchesTypeFilter(item.petSpecies);
   });
 
   const petTags = (item: WalkFeedItem): string[] => {
@@ -214,9 +222,14 @@ export const FindPartnersScreen: React.FC<FindPartnersScreenProps> = ({ navigati
       <Animated.View style={[styles.invSection, { maxHeight: invMaxHeight, opacity: invAnim, overflow: 'hidden' }]}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>My Invitations</Text>
-          <TouchableOpacity style={styles.postNewBtn} onPress={() => navigation.navigate('PostInvitation')}>
-            <Text style={styles.postNewText}>+ Post New</Text>
-          </TouchableOpacity>
+          <View style={styles.sectionHeaderActions}>
+            <TouchableOpacity style={styles.completedBtn} onPress={() => navigation.navigate('CompletedWalks')}>
+              <Text style={styles.completedText}>✓ Completed</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.postNewBtn} onPress={() => navigation.navigate('PostInvitation')}>
+              <Text style={styles.postNewText}>+ Post New</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {myInvitations.length === 0 ? (
@@ -271,7 +284,7 @@ export const FindPartnersScreen: React.FC<FindPartnersScreenProps> = ({ navigati
       <View style={styles.filtersSection}>
         <FilterRow
           label="Type"
-          options={['All', 'Dogs', 'Cats']}
+          options={['All', 'Dogs', 'Cats', 'Other']}
           active={typeFilter}
           onSelect={setTypeFilter}
         />
@@ -283,6 +296,8 @@ export const FindPartnersScreen: React.FC<FindPartnersScreenProps> = ({ navigati
         contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 20 }]}
         showsVerticalScrollIndicator={false}
         onScroll={handleScroll}
+        onScrollEndDrag={handleScrollEnd}
+        onMomentumScrollEnd={handleScrollEnd}
         scrollEventThrottle={16}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
       >
@@ -380,6 +395,16 @@ const styles = StyleSheet.create({
     paddingTop: 14,
     marginBottom: 10,
   },
+  sectionHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  completedBtn: {
+    backgroundColor: COLORS.bg,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 100,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  completedText: { color: COLORS.textSub, fontSize: 12, fontWeight: '700' },
   postNewBtn: {
     backgroundColor: COLORS.primary,
     paddingHorizontal: 14,

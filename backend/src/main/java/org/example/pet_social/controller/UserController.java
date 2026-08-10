@@ -52,11 +52,20 @@ public class UserController {
     public ResponseEntity<AuthResponse> getUser(@PathVariable Long id) {
         User user = userService.getUserById(id);
         if (user == null) return ResponseEntity.notFound().build();
-        return ResponseEntity.ok(toResponse(user));
+        // Public profile lookup — never mint a token here (a token belongs only to the
+        // authenticated owner, issued at login/register). Returning one would let anyone
+        // impersonate any account via GET /api/users/{id}.
+        return ResponseEntity.ok(profileResponse(user));
     }
 
+    /** Login/register response: includes the caller's own freshly issued token. */
     private AuthResponse toResponse(User u) {
         return new AuthResponse(u.getId(), u.getName(), u.getEmail(), u.getRole(), u.isActive(),
                 jwtService.issue(u.getId(), u.getEmail()));
+    }
+
+    /** Read-only profile view: identical shape, but without a token. */
+    private AuthResponse profileResponse(User u) {
+        return new AuthResponse(u.getId(), u.getName(), u.getEmail(), u.getRole(), u.isActive());
     }
 }

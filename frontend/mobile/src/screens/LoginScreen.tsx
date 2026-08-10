@@ -14,7 +14,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 import { COLORS } from '../constants/colors';
-import { apiPost, saveToken } from '../utils/api';
+import { apiPost, saveToken, saveUserId } from '../utils/api';
 
 // ── Google OAuth ─────────────────────────────────────────────────────────────
 // Web Client ID is required by GoogleSignin to obtain an ID token on Android.
@@ -52,6 +52,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
       if (!idToken) throw new Error('No ID token returned from Google');
       const res = await apiPost<AuthResponse>('/api/auth/google', { idToken });
       await saveToken(res.token);
+      await saveUserId(res.userId);
       navigation.reset({ index: 0, routes: [{ name: 'Tabs' }] });
     } catch (e: any) {
       if (e.code === statusCodes.SIGN_IN_CANCELLED) return;
@@ -70,6 +71,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
       setLoading(true);
       const res = await apiPost<AuthResponse>('/api/auth/login', { email, password });
       await saveToken(res.token);
+      await saveUserId(res.userId);
       navigation.reset({ index: 0, routes: [{ name: 'Tabs' }] });
     } catch (e: any) {
       Alert.alert('Login Failed', e.message || 'Invalid email or password');

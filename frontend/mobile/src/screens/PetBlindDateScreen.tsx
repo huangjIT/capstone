@@ -36,6 +36,7 @@ export interface DateInvitation {
   petBreed?: string;
   petProfilePhotoUrl?: string;
   petAge?: string;
+  imageUrls?: string[];
 }
 
 export interface DateFeedItem {
@@ -61,6 +62,7 @@ export interface DateFeedItem {
   myRequestId?: string;
   myRequestStatus?: string;
   unreadMessageCount?: number;
+  imageUrls?: string[];
 }
 
 interface PetBlindDateScreenProps {
@@ -95,22 +97,17 @@ export const PetBlindDateScreen: React.FC<PetBlindDateScreenProps> = ({ navigati
 
   const datesAnim = useRef(new Animated.Value(1)).current;
   const isDatesVisible = useRef(true);
-  const animating = useRef(false);
 
   const showDates = useCallback(() => {
-    if (isDatesVisible.current || animating.current) return;
+    if (isDatesVisible.current) return;
     isDatesVisible.current = true;
-    animating.current = true;
-    Animated.timing(datesAnim, { toValue: 1, duration: 200, useNativeDriver: false })
-      .start(() => { animating.current = false; });
+    Animated.timing(datesAnim, { toValue: 1, duration: 200, useNativeDriver: false }).start();
   }, [datesAnim]);
 
   const hideDates = useCallback(() => {
-    if (!isDatesVisible.current || animating.current) return;
+    if (!isDatesVisible.current) return;
     isDatesVisible.current = false;
-    animating.current = true;
-    Animated.timing(datesAnim, { toValue: 0, duration: 200, useNativeDriver: false })
-      .start(() => { animating.current = false; });
+    Animated.timing(datesAnim, { toValue: 0, duration: 200, useNativeDriver: false }).start();
   }, [datesAnim]);
 
   const handleScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -118,6 +115,13 @@ export const PetBlindDateScreen: React.FC<PetBlindDateScreenProps> = ({ navigati
     if (y > 50) hideDates();
     else if (y < 20) showDates();
   }, [hideDates, showDates]);
+
+  // Settle to the correct state at the final scroll position (fast flings can
+  // end inside the 20-50px dead zone without a matching scroll event).
+  const handleScrollEnd = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const y = e.nativeEvent.contentOffset.y;
+    if (y < 50) showDates();
+  }, [showDates]);
 
   const datesMaxHeight = datesAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 200] });
 
@@ -207,9 +211,14 @@ export const PetBlindDateScreen: React.FC<PetBlindDateScreenProps> = ({ navigati
       <Animated.View style={[styles.myDatesSection, { maxHeight: datesMaxHeight, opacity: datesAnim, overflow: 'hidden' }]}>
         <View style={styles.myDatesHeader}>
           <Text style={styles.myDatesTitle}>My Dates</Text>
-          <TouchableOpacity onPress={() => navigation.navigate('PostDateInvitation')}>
-            <Text style={styles.manageText}>+ Post Date →</Text>
-          </TouchableOpacity>
+          <View style={styles.myDatesHeaderActions}>
+            <TouchableOpacity style={styles.completedBtn} onPress={() => navigation.navigate('CompletedDates')}>
+              <Text style={styles.completedText}>✓ Completed</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => navigation.navigate('PostDateInvitation')}>
+              <Text style={styles.manageText}>+ Post Date →</Text>
+            </TouchableOpacity>
+          </View>
         </View>
         <ScrollView
           horizontal
@@ -269,6 +278,8 @@ export const PetBlindDateScreen: React.FC<PetBlindDateScreenProps> = ({ navigati
         keyExtractor={(item) => item.id}
         showsVerticalScrollIndicator={false}
         onScroll={handleScroll}
+        onScrollEndDrag={handleScrollEnd}
+        onMomentumScrollEnd={handleScrollEnd}
         scrollEventThrottle={16}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.purple} />}
         ListHeaderComponent={
@@ -369,6 +380,16 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   myDatesTitle: { fontSize: 15, fontWeight: '700', color: COLORS.text },
+  myDatesHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  completedBtn: {
+    backgroundColor: COLORS.bg,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 100,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  completedText: { color: COLORS.textSub, fontSize: 12, fontWeight: '700' },
   manageText: { fontSize: 13, color: COLORS.purple, fontWeight: '600' },
   myDatesScroll: { paddingHorizontal: 16, paddingBottom: 14, gap: 10 },
   dateCard: {

@@ -5,7 +5,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
-import java.util.Optional;
 
 @Repository
 public interface UserRepository extends JpaRepository<User, Long> {
@@ -13,7 +12,13 @@ public interface UserRepository extends JpaRepository<User, Long> {
     // Spring automatically generates the SQL for this just by reading the method name!
     List<User> findByIsActiveTrue();
 
-    Optional<User> findByEmail(String email);
+    // COUNT(*) in the database. Dashboard gauges run on every Prometheus scrape —
+    // loading every active user as an entity just to call size() does not scale.
+    long countByIsActiveTrue();
+
+    // Case-insensitive: emails are stored lowercase for new accounts, but rows
+    // created before 2026-07-17 may carry mixed case (and case-variant duplicates).
+    List<User> findByEmailIgnoreCaseOrderByIdAsc(String email);
 
     List<User> findByRole(String role);
 }

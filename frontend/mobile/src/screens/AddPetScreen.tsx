@@ -12,7 +12,7 @@ import { BreedPicker } from '../components/BreedPicker';
 import { apiPost } from '../utils/api';
 import { uploadImage } from '../utils/uploadImage';
 
-type Species = 'DOG' | 'CAT';
+type Species = 'DOG' | 'CAT' | 'OTHER';
 type Gender  = 'MALE' | 'FEMALE';
 
 function toIsoDate(d: Date): string {
@@ -51,8 +51,8 @@ export const AddPetScreen: React.FC<Props> = ({ navigation }) => {
     setSpeciesRaw(s);
   };
   const [bio, setBio]                 = useState('');
-  const [isVaccinated, setIsVaccinated] = useState(false);
-  const [isNeutered, setIsNeutered]   = useState(false);
+  const [isVaccinated, setIsVaccinated] = useState<boolean | null>(null);
+  const [isNeutered, setIsNeutered]   = useState<boolean | null>(null);
 
   const pickPhoto = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -71,6 +71,13 @@ export const AddPetScreen: React.FC<Props> = ({ navigation }) => {
 
   const handleSubmit = async () => {
     if (!name.trim()) { Alert.alert('Validation', 'Pet name is required'); return; }
+    if (isVaccinated === null || isNeutered === null) {
+      Alert.alert(
+        'Health info required',
+        'Please let us know whether your pet is vaccinated and neutered/spayed — this keeps other pets safe on walks and dates.'
+      );
+      return;
+    }
     try {
       setSaving(true);
       let profilePhotoUrl: string | undefined;
@@ -147,14 +154,14 @@ export const AddPetScreen: React.FC<Props> = ({ navigation }) => {
           <View style={styles.fieldGroup}>
             <Text style={styles.fieldLabel}>Species</Text>
             <View style={styles.toggleRow}>
-              {(['DOG', 'CAT'] as Species[]).map(s => (
+              {(['DOG', 'CAT', 'OTHER'] as Species[]).map(s => (
                 <TouchableOpacity
                   key={s}
                   style={[styles.toggleOpt, species === s && styles.toggleOptActive]}
                   onPress={() => setSpecies(s)}
                 >
                   <Text style={[styles.toggleText, species === s && styles.toggleTextActive]}>
-                    {s === 'DOG' ? '🐕  Dog' : '🐈  Cat'}
+                    {s === 'DOG' ? '🐕  Dog' : s === 'CAT' ? '🐈  Cat' : '🐾  Other'}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -171,7 +178,17 @@ export const AddPetScreen: React.FC<Props> = ({ navigation }) => {
           {/* Breed */}
           <View style={[styles.fieldGroup, styles.fieldBorder]}>
             <Text style={styles.fieldLabel}>Breed</Text>
-            <BreedPicker species={species} value={breed} onChange={setBreed} />
+            {species === 'OTHER' ? (
+              <TextInput
+                style={styles.input}
+                value={breed}
+                onChangeText={setBreed}
+                placeholder="e.g. Rabbit, Parrot, Hamster..."
+                placeholderTextColor={COLORS.textMuted}
+              />
+            ) : (
+              <BreedPicker species={species} value={breed} onChange={setBreed} />
+            )}
           </View>
 
           {/* Birthday / Age */}
@@ -219,24 +236,36 @@ export const AddPetScreen: React.FC<Props> = ({ navigation }) => {
 
           {/* Health */}
           <View style={[styles.fieldGroup, styles.fieldBorder]}>
-            <Text style={styles.fieldLabel}>Health</Text>
-            <View style={styles.checkRow}>
-              <TouchableOpacity
-                style={[styles.checkChip, isVaccinated && styles.checkChipActive]}
-                onPress={() => setIsVaccinated(v => !v)}
-              >
-                <Text style={[styles.checkText, isVaccinated && styles.checkTextActive]}>
-                  {isVaccinated ? '✓ ' : ''}Vaccinated
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.checkChip, isNeutered && styles.checkChipActive]}
-                onPress={() => setIsNeutered(v => !v)}
-              >
-                <Text style={[styles.checkText, isNeutered && styles.checkTextActive]}>
-                  {isNeutered ? '✓ ' : ''}Neutered
-                </Text>
-              </TouchableOpacity>
+            <Text style={styles.fieldLabel}>Vaccinated *</Text>
+            <View style={styles.toggleRow}>
+              {([true, false] as const).map(v => (
+                <TouchableOpacity
+                  key={String(v)}
+                  style={[styles.toggleOpt, isVaccinated === v && styles.toggleOptActive]}
+                  onPress={() => setIsVaccinated(v)}
+                >
+                  <Text style={[styles.toggleText, isVaccinated === v && styles.toggleTextActive]}>
+                    {v ? 'Yes' : 'No'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          <View style={[styles.fieldGroup, styles.fieldBorder]}>
+            <Text style={styles.fieldLabel}>Neutered / Spayed *</Text>
+            <View style={styles.toggleRow}>
+              {([true, false] as const).map(v => (
+                <TouchableOpacity
+                  key={String(v)}
+                  style={[styles.toggleOpt, isNeutered === v && styles.toggleOptActive]}
+                  onPress={() => setIsNeutered(v)}
+                >
+                  <Text style={[styles.toggleText, isNeutered === v && styles.toggleTextActive]}>
+                    {v ? 'Yes' : 'No'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
             </View>
           </View>
         </View>
@@ -325,14 +354,6 @@ const styles = StyleSheet.create({
   },
   toggleText: { fontSize: 14, fontWeight: '400', color: COLORS.textMuted },
   toggleTextActive: { fontWeight: '700', color: COLORS.text },
-  checkRow: { flexDirection: 'row', gap: 12 },
-  checkChip: {
-    flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: 'center',
-    backgroundColor: COLORS.bg, borderWidth: 1, borderColor: COLORS.border,
-  },
-  checkChipActive: { backgroundColor: COLORS.primaryLight, borderColor: COLORS.primaryBorder },
-  checkText: { fontSize: 13, fontWeight: '600', color: COLORS.textMuted },
-  checkTextActive: { color: COLORS.primary },
   primaryBtn: {
     backgroundColor: COLORS.primary, borderRadius: 16,
     paddingVertical: 16, alignItems: 'center',

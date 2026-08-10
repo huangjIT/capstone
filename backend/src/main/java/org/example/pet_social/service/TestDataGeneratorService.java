@@ -137,6 +137,7 @@ public class TestDataGeneratorService {
 
             while (System.currentTimeMillis() < endTime) {
                 try {
+                    long tickStart = System.currentTimeMillis();
                     for (int i = 0; i < recordsPerSecond; i++) {
                         long userId = random.nextInt(userCount) + 1;
                         double latitude = TORONTO_LAT_MIN + (TORONTO_LAT_MAX - TORONTO_LAT_MIN) * random.nextDouble();
@@ -148,8 +149,13 @@ public class TestDataGeneratorService {
                         recordCount++;
                     }
 
-                    // Sleep to maintain rate (roughly)
-                    Thread.sleep(1000);
+                    // Sleep only for the remainder of the second — a flat 1000ms sleep on top
+                    // of however long the blast took made the offered rate bursty and lower
+                    // than requested (the throughput-oscillation issue from the 2026-06-16 notes).
+                    long remaining = 1000 - (System.currentTimeMillis() - tickStart);
+                    if (remaining > 0) {
+                        Thread.sleep(remaining);
+                    }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     break;

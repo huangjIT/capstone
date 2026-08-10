@@ -2,7 +2,10 @@ package org.example.pet_social.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Service;
 
 import javax.crypto.Mac;
@@ -10,6 +13,7 @@ import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.Optional;
 
@@ -22,13 +26,30 @@ import java.util.Optional;
 public class JwtService {
 
     private static final String HEADER_B64 = base64Url("{\"alg\":\"HS256\",\"typ\":\"JWT\"}".getBytes(StandardCharsets.UTF_8));
+    static final String DEFAULT_DEV_SECRET = "pawpal-dev-secret-change-in-production";
+    private static final Logger log = LoggerFactory.getLogger(JwtService.class);
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final byte[] secret;
     private final long ttlSeconds;
 
     public JwtService(@Value("${app.jwt.secret:pawpal-dev-secret-change-in-production}") String secret,
-                      @Value("${app.jwt.ttl-hours:168}") long ttlHours) {
+                      @Value("${app.jwt.ttl-hours:168}") long ttlHours,
+                      Environment environment) {
+        boolean isDev = environment == null || environment.getActiveProfiles().length == 0
+                || Arrays.asList(environment.getActiveProfiles()).contains("dev")
+                || Arrays.asList(environment.getActiveProfiles()).contains("test");
+        if (DEFAULT_DEV_SECRET.equals(secret)) {
+            if (!isDev) {
+                // Anyone with the source could forge tokens — refuse to run with the known secret in prod.
+                throw new IllegalStateException(
+                        "Refusing to start: app.jwt.secret is the built-in dev default. "
+                        + "Set APP_JWT_SECRET to a strong random value (32+ bytes).");
+            }
+            log.warn("JwtService is using the built-in DEV JWT secret. Set APP_JWT_SECRET before deploying.");
+        } else if (secret.getBytes(StandardCharsets.UTF_8).length < 32) {
+            log.warn("app.jwt.secret is shorter than 32 bytes; use a longer random secret for HMAC-SHA256.");
+        }
         this.secret = secret.getBytes(StandardCharsets.UTF_8);
         this.ttlSeconds = ttlHours * 3600;
     }

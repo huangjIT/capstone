@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/colors';
 import { apiPost } from '../utils/api';
 import { DateFeedItem } from './PetBlindDateScreen';
+import { ImageViewerModal } from '../components/ImageViewerModal';
 
 interface DatePetProfileScreenProps {
   navigation: any;
@@ -32,6 +33,9 @@ export const DatePetProfileScreen: React.FC<DatePetProfileScreenProps> = ({
   const [dialog, setDialog] = useState<{ visible: boolean; success: boolean; message: string }>({
     visible: false, success: true, message: '',
   });
+  const [viewerVisible, setViewerVisible] = useState(false);
+  const [viewerIndex, setViewerIndex] = useState(0);
+  const images = feedItem?.imageUrls ?? [];
   const scaleAnim = useRef(new Animated.Value(0.8)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
 
@@ -125,11 +129,6 @@ export const DatePetProfileScreen: React.FC<DatePetProfileScreenProps> = ({
               </Text>
               <Text style={styles.statLabel}>Gender</Text>
             </View>
-            <View style={styles.statBox}>
-              <Text style={styles.statIcon}>📏</Text>
-              <Text style={styles.statValue}>{feedItem?.distanceLabel || '—'}</Text>
-              <Text style={styles.statLabel}>Away</Text>
-            </View>
           </View>
 
           {/* Health tags */}
@@ -158,6 +157,28 @@ export const DatePetProfileScreen: React.FC<DatePetProfileScreenProps> = ({
               </Text>
             </View>
           </View>
+
+          {/* Photos */}
+          {images.length > 0 && (
+            <>
+              <Text style={styles.sectionTitle}>📸 Photos</Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.photoScrollContent}
+              >
+                {images.map((uri, i) => (
+                  <TouchableOpacity
+                    key={uri + i}
+                    onPress={() => { setViewerIndex(i); setViewerVisible(true); }}
+                    activeOpacity={0.85}
+                  >
+                    <Image source={{ uri }} style={styles.photoThumb} />
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </>
+          )}
 
           {/* Message from owner */}
           {feedItem?.message ? (
@@ -243,6 +264,13 @@ export const DatePetProfileScreen: React.FC<DatePetProfileScreenProps> = ({
           </Animated.View>
         </View>
       </Modal>
+
+      <ImageViewerModal
+        visible={viewerVisible}
+        images={images}
+        initialIndex={viewerIndex}
+        onClose={() => setViewerVisible(false)}
+      />
     </View>
   );
 };
@@ -339,6 +367,8 @@ const styles = StyleSheet.create({
   invRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   invIcon: { fontSize: 16, width: 20 },
   invText: { fontSize: 14, color: COLORS.text, flex: 1 },
+  photoScrollContent: { gap: 10, paddingBottom: 20 },
+  photoThumb: { width: 96, height: 96, borderRadius: 14, backgroundColor: COLORS.bg },
   messageCard: {
     backgroundColor: COLORS.bg,
     borderRadius: 14,

@@ -16,6 +16,7 @@ import { ChatBubble } from '../components/ChatBubble';
 import { ChatInputBar } from '../components/ChatInputBar';
 import { apiGet, apiPost } from '../utils/api';
 import { categoryEmoji, conditionLabel } from './MarketplaceScreen';
+import { ImageViewerModal } from '../components/ImageViewerModal';
 
 interface MarketplaceChatScreenProps {
   navigation: any;
@@ -70,7 +71,8 @@ export const MarketplaceChatScreen: React.FC<MarketplaceChatScreenProps> = ({
 
   useEffect(() => {
     fetchMessages();
-    intervalRef.current = setInterval(fetchMessages, 1000);
+    // 4s keeps the chat feeling live without hammering the thread endpoint every second.
+    intervalRef.current = setInterval(fetchMessages, 4000);
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
@@ -98,6 +100,10 @@ export const MarketplaceChatScreen: React.FC<MarketplaceChatScreenProps> = ({
   }, [otherUserId, item?.id]);
 
   const isSold = item?.status === 'SOLD';
+  const images: string[] = item?.imageUrls?.length ? item.imageUrls : (item?.photoUrl ? [item.photoUrl] : []);
+  const [viewerVisible, setViewerVisible] = useState(false);
+  const [viewerIndex, setViewerIndex] = useState(0);
+  const openViewer = (index: number) => { setViewerIndex(index); setViewerVisible(true); };
 
   return (
     <KeyboardAvoidingView
@@ -140,17 +146,24 @@ export const MarketplaceChatScreen: React.FC<MarketplaceChatScreenProps> = ({
         {/* Item Card */}
         <View style={styles.itemCard}>
           <View style={styles.itemCardInner}>
-            <View style={styles.itemImageBox}>
-              {item?.photoUrl ? (
-                <Image source={{ uri: item.photoUrl }} style={styles.itemPhoto} />
+            <TouchableOpacity
+              style={styles.itemImageBox}
+              activeOpacity={images.length ? 0.85 : 1}
+              onPress={() => images.length && openViewer(0)}
+            >
+              {images.length ? (
+                <Image source={{ uri: images[0] }} style={styles.itemPhoto} />
               ) : (
                 <Text style={styles.itemEmoji}>{categoryEmoji(item?.category)}</Text>
               )}
-            </View>
+            </TouchableOpacity>
             <View style={styles.itemDetails}>
               <Text style={styles.itemName}>{item?.name || 'Item'}</Text>
               {item?.condition ? (
                 <Text style={styles.itemCondition}>Condition: {conditionLabel(item.condition)}</Text>
+              ) : null}
+              {item?.location ? (
+                <Text style={styles.itemLocation} numberOfLines={1}>📍 {item.location}</Text>
               ) : null}
               <View style={styles.itemPriceRow}>
                 <Text style={styles.itemPrice}>${item?.price ?? 0}</Text>
@@ -166,6 +179,19 @@ export const MarketplaceChatScreen: React.FC<MarketplaceChatScreenProps> = ({
               </View>
             </View>
           </View>
+          {images.length > 1 && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.itemGalleryRow}
+            >
+              {images.map((uri, i) => (
+                <TouchableOpacity key={uri + i} onPress={() => openViewer(i)} activeOpacity={0.85}>
+                  <Image source={{ uri }} style={styles.itemGalleryThumb} />
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
         </View>
 
         {/* Chat Messages */}
@@ -187,6 +213,13 @@ export const MarketplaceChatScreen: React.FC<MarketplaceChatScreenProps> = ({
 
       {/* Chat Input */}
       <ChatInputBar onSend={handleSend} />
+
+      <ImageViewerModal
+        visible={viewerVisible}
+        images={images}
+        initialIndex={viewerIndex}
+        onClose={() => setViewerVisible(false)}
+      />
     </KeyboardAvoidingView>
   );
 };
@@ -298,6 +331,17 @@ const styles = StyleSheet.create({
   itemEmoji: {
     fontSize: 38,
   },
+  itemGalleryRow: {
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingBottom: 14,
+  },
+  itemGalleryThumb: {
+    width: 52,
+    height: 52,
+    borderRadius: 10,
+    backgroundColor: COLORS.bg,
+  },
   itemDetails: {
     flex: 1,
     justifyContent: 'center',
@@ -311,6 +355,11 @@ const styles = StyleSheet.create({
   itemCondition: {
     fontSize: 12,
     color: COLORS.textMuted,
+  },
+  itemLocation: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    marginTop: 2,
   },
   itemPriceRow: {
     flexDirection: 'row',

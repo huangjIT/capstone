@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/colors';
-import { apiPost, saveToken } from '../utils/api';
+import { apiPost, saveToken, saveUserId } from '../utils/api';
 
 interface SignUpScreenProps {
   navigation: any;
@@ -47,6 +47,7 @@ export const SignUpScreen: React.FC<SignUpScreenProps> = ({ navigation }) => {
       setLoading(true);
       const res = await apiPost<AuthResponse>('/api/auth/register', { name, email, password });
       await saveToken(res.token);
+      await saveUserId(res.userId);
       navigation.reset({ index: 0, routes: [{ name: 'Tabs' }] });
     } catch (e: any) {
       Alert.alert('Sign Up Failed', e.message || 'Something went wrong');

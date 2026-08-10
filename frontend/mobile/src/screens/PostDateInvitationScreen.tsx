@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -12,10 +12,16 @@ import {
   Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import * as Location from 'expo-location';
+import * as ImagePicker from 'expo-image-picker';
 import { COLORS } from '../constants/colors';
 import { apiPost, apiGet } from '../utils/api';
+import { uploadImage } from '../utils/uploadImage';
+import { ImageViewerModal } from '../components/ImageViewerModal';
+
+const MAX_PHOTOS = 5;
 
 interface Pet {
   id: string;
@@ -40,6 +46,7 @@ interface PostDateInvitationScreenProps {
 export const PostDateInvitationScreen: React.FC<PostDateInvitationScreenProps> = ({ navigation }) => {
   const insets = useSafeAreaInsets();
   const [pets, setPets] = useState<Pet[]>([]);
+  const [petsLoaded, setPetsLoaded] = useState(false);
   const [selectedPetId, setSelectedPetId] = useState<string | null>(null);
   const [location, setLocation] = useState('');
   const [locationCoords, setLocationCoords] = useState<{ latitude: number; longitude: number } | null>(null);
@@ -50,13 +57,18 @@ export const PostDateInvitationScreen: React.FC<PostDateInvitationScreenProps> =
   const [timePickerVisible, setTimePickerVisible] = useState(false);
   const [message, setMessage] = useState('');
   const [saving, setSaving] = useState(false);
+  const [images, setImages] = useState<string[]>([]);
+  const [viewerVisible, setViewerVisible] = useState(false);
+  const [viewerIndex, setViewerIndex] = useState(0);
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     apiGet<Pet[]>('/api/pets/my').then(list => {
       setPets(list);
       if (list.length === 1) setSelectedPetId(list[0].id);
-    }).catch(() => {});
-  }, []);
+    }).catch(() => {}).finally(() => setPetsLoaded(true));
+  }, []));
+
+  const noPetsYet = petsLoaded && pets.length === 0;
 
   const useCurrentLocation = async () => {
     try {
@@ -84,6 +96,34 @@ export const PostDateInvitationScreen: React.FC<PostDateInvitationScreenProps> =
     }
   };
 
+  const pickImages = async () => {
+    const remaining = MAX_PHOTOS - images.length;
+    if (remaining <= 0) return;
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Please allow photo library access in Settings.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.8,
+      allowsMultipleSelection: true,
+      selectionLimit: remaining,
+    });
+    if (!result.canceled) {
+      setImages(prev => [...prev, ...result.assets.map(a => a.uri)].slice(0, MAX_PHOTOS));
+    }
+  };
+
+  const removeImage = (index: number) => {
+    setImages(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const openViewer = (index: number) => {
+    setViewerIndex(index);
+    setViewerVisible(true);
+  };
+
   const handlePost = async () => {
     if (!selectedPetId) { Alert.alert('Validation', 'Please select the pet going on the date.'); return; }
     if (!location.trim()) { Alert.alert('Validation', 'Please set a meeting location.'); return; }
@@ -91,6 +131,9 @@ export const PostDateInvitationScreen: React.FC<PostDateInvitationScreenProps> =
     if (!selectedTime) { Alert.alert('Validation', 'Please select a time.'); return; }
     try {
       setSaving(true);
+      const imageUrls = images.length
+        ? await Promise.all(images.map(uri => uploadImage(uri, 'dates')))
+        : [];
       await apiPost('/api/date/invitations', {
         hostPetId: selectedPetId,
         location: location.trim(),
@@ -98,6 +141,7 @@ export const PostDateInvitationScreen: React.FC<PostDateInvitationScreenProps> =
         time: formatTime(selectedTime),
         message: message.trim() || undefined,
         ...(locationCoords ? { latitude: locationCoords.latitude, longitude: locationCoords.longitude } : {}),
+        ...(imageUrls.length ? { imageUrls } : {}),
       });
       navigation.goBack();
     } catch (e: any) {
@@ -140,6 +184,22 @@ export const PostDateInvitationScreen: React.FC<PostDateInvitationScreenProps> =
           <View style={styles.backBtn} />
         </View>
 
+        {noPetsYet ? (
+          <View style={styles.emptyPetsWrap}>
+            <Text style={styles.emptyPetsEmoji}>🐾</Text>
+            <Text style={styles.emptyPetsTitle}>Add a pet first</Text>
+            <Text style={styles.emptyPetsText}>
+              You need a pet profile before you can post a date invitation.
+            </Text>
+            <TouchableOpacity
+              style={styles.emptyPetsBtn}
+              onPress={() => navigation.navigate('AddPet')}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.emptyPetsBtnText}>+ Add Your First Pet</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
         <View style={styles.formBody}>
           {/* Pet selector — single choice */}
           {pets.length > 0 && (
@@ -230,6 +290,33 @@ export const PostDateInvitationScreen: React.FC<PostDateInvitationScreenProps> =
             </TouchableOpacity>
           </View>
 
+          {/* Photos */}
+          <View style={styles.fieldGroup}>
+            <Text style={styles.fieldLabel}>📸 Photos (optional, up to {MAX_PHOTOS})</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.photoScrollContent}
+            >
+              {images.map((uri, i) => (
+                <View key={uri + i} style={styles.photoThumbWrap}>
+                  <TouchableOpacity onPress={() => openViewer(i)} activeOpacity={0.85}>
+                    <Image source={{ uri }} style={styles.photoThumb} />
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.photoRemoveBtn} onPress={() => removeImage(i)} hitSlop={8}>
+                    <Text style={styles.photoRemoveText}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+              {images.length < MAX_PHOTOS && (
+                <TouchableOpacity style={styles.addPhotoTile} onPress={pickImages} activeOpacity={0.8}>
+                  <Text style={styles.addPhotoIcon}>+</Text>
+                  <Text style={styles.addPhotoText}>Add Photo</Text>
+                </TouchableOpacity>
+              )}
+            </ScrollView>
+          </View>
+
           {/* Message */}
           <View style={styles.fieldGroup}>
             <Text style={styles.fieldLabel}>💬 Message (optional)</Text>
@@ -252,9 +339,11 @@ export const PostDateInvitationScreen: React.FC<PostDateInvitationScreenProps> =
             <Text style={styles.tipText}>• Keep vaccination info up to date on your pet profile</Text>
           </View>
         </View>
+        )}
       </ScrollView>
 
       {/* CTA */}
+      {!noPetsYet && (
       <View style={[styles.ctaContainer, { paddingBottom: insets.bottom + 16 }]}>
         <TouchableOpacity style={[styles.ctaButton, saving && { opacity: 0.6 }]} onPress={handlePost} disabled={saving}>
           {saving
@@ -262,6 +351,14 @@ export const PostDateInvitationScreen: React.FC<PostDateInvitationScreenProps> =
             : <Text style={styles.ctaText}>💕 Post Date Invitation</Text>}
         </TouchableOpacity>
       </View>
+      )}
+
+      <ImageViewerModal
+        visible={viewerVisible}
+        images={images}
+        initialIndex={viewerIndex}
+        onClose={() => setViewerVisible(false)}
+      />
     </View>
   );
 };
@@ -283,6 +380,34 @@ const styles = StyleSheet.create({
   backText: { fontSize: 15, color: COLORS.purple, fontWeight: '600' },
   headerTitle: { fontSize: 17, fontWeight: '700', color: COLORS.text },
   formBody: { padding: 20, gap: 4 },
+  emptyPetsWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 40,
+    paddingTop: 80,
+  },
+  emptyPetsEmoji: { fontSize: 56, marginBottom: 16 },
+  emptyPetsTitle: { fontSize: 20, fontWeight: '800', color: COLORS.text, marginBottom: 8 },
+  emptyPetsText: {
+    fontSize: 14,
+    color: COLORS.textSub,
+    textAlign: 'center',
+    lineHeight: 21,
+    marginBottom: 28,
+  },
+  emptyPetsBtn: {
+    backgroundColor: COLORS.purple,
+    borderRadius: 100,
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    shadowColor: COLORS.purple,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 5,
+  },
+  emptyPetsBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
   fieldGroup: { marginBottom: 16 },
   fieldLabel: { fontSize: 13, fontWeight: '600', color: COLORS.textSub, marginBottom: 8 },
   input: {
@@ -354,6 +479,37 @@ const styles = StyleSheet.create({
   petChipNameActive: { color: COLORS.purple },
   petChipBreed: { fontSize: 11, color: COLORS.textMuted, marginTop: 1 },
   petChipCheck: { fontSize: 14, color: COLORS.purple, fontWeight: '700' },
+  photoScrollContent: { gap: 10, paddingVertical: 4 },
+  photoThumbWrap: { width: 84, height: 84 },
+  photoThumb: { width: 84, height: 84, borderRadius: 14, backgroundColor: COLORS.card },
+  photoRemoveBtn: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#EF4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: COLORS.bg,
+  },
+  photoRemoveText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
+  addPhotoTile: {
+    width: 84,
+    height: 84,
+    borderRadius: 14,
+    backgroundColor: COLORS.card,
+    borderWidth: 1.5,
+    borderColor: '#DDD6FE',
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  addPhotoIcon: { fontSize: 22, color: COLORS.purple, fontWeight: '300' },
+  addPhotoText: { fontSize: 10, color: COLORS.purple, fontWeight: '600' },
   tipCard: {
     backgroundColor: COLORS.purpleLight,
     borderRadius: 16,

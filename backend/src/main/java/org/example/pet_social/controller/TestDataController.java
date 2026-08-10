@@ -4,6 +4,7 @@ import org.example.pet_social.entity.UserLocation;
 import org.example.pet_social.service.TestDataGeneratorService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -11,9 +12,12 @@ import java.util.Map;
 
 /**
  * Test Data Controller
- * Endpoints for generating and managing test data
+ * Endpoints for generating and managing test data.
+ * Unauthenticated and able to generate unbounded load (/stream spawns producer threads),
+ * so real deployments disable it via APP_TEST_ENDPOINTS_ENABLED=false.
  */
 @RestController
+@ConditionalOnProperty(name = "app.test-endpoints.enabled", havingValue = "true", matchIfMissing = true)
 @RequestMapping("/api/test-data")
 public class TestDataController {
 

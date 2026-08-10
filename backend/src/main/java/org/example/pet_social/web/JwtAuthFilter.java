@@ -8,17 +8,28 @@ import org.example.pet_social.service.JwtService;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.Optional;
 
 /**
- * Bearer-token gate for the private APIs (registered on /api/matches/* and
- * /api/messages/* in WebConfig — the rest of the API stays open until full
- * Spring Security lands). On success the authenticated userId is exposed as
- * request attribute {@link #AUTH_USER_ID}.
+ * Bearer-token gate for the whole API surface (registered on /api/* in WebConfig).
+ * Only the endpoints that mint tokens (register/login/google) and the health probe
+ * are public — everything else requires a valid JWT. On success the authenticated
+ * userId is exposed as request attribute {@link #AUTH_USER_ID}.
  */
 public class JwtAuthFilter extends OncePerRequestFilter {
 
     public static final String AUTH_USER_ID = "authUserId";
+
+    // Endpoints reachable without a token: the ones that issue tokens, and the
+    // health probe (load balancers and uptime checks can't log in).
+    private static final List<String> PUBLIC_PATHS = List.of(
+            "/api/auth/register",
+            "/api/auth/login",
+            "/api/auth/google",
+            "/api/users/register", // legacy aliases of /api/auth/*, kept for the original frontend
+            "/api/users/login",
+            "/api/system/health");
 
     private final JwtService jwtService;
 
@@ -31,6 +42,10 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         // CORS preflight requests carry no Authorization header by design
         if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+            chain.doFilter(request, response);
+            return;
+        }
+        if (PUBLIC_PATHS.contains(request.getRequestURI())) {
             chain.doFilter(request, response);
             return;
         }

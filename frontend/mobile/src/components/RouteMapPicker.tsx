@@ -15,41 +15,9 @@ import type { MapView as MapViewType } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/colors';
+import { fetchORSRoute, formatWalkDuration as formatDuration, formatWalkDistance as formatDistance, LatLng } from '../utils/routing';
 
 const ORS_API_KEY = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImIwYjcwMzQ3ZTI4MzQ1MGNhYmZjMzUxNjgyNzYyNGE1IiwiaCI6Im11cm11cjY0In0='; // 替换成你的 Key
-
-interface RouteResult {
-  coords: LatLng[];
-  durationSeconds: number;
-  distanceMeters: number;
-}
-
-async function fetchORSRoute(start: LatLng, end: LatLng): Promise<RouteResult | null> {
-  try {
-    const url = `https://api.openrouteservice.org/v2/directions/foot-walking?api_key=${ORS_API_KEY}&start=${start.longitude},${start.latitude}&end=${end.longitude},${end.latitude}`;
-    const res = await fetch(url);
-    const data = await res.json();
-    const feature = data.features?.[0];
-    if (!feature) return null;
-    const coords = feature.geometry.coordinates.map(([lng, lat]: [number, number]) => ({ latitude: lat, longitude: lng }));
-    const summary = feature.properties?.summary;
-    return {
-      coords,
-      durationSeconds: summary?.duration ?? 0,
-      distanceMeters: summary?.distance ?? 0,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function formatDuration(seconds: number): string {
-  const mins = Math.round(seconds / 60);
-  if (mins < 60) return `${mins} min walk`;
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  return m > 0 ? `${h}h ${m}min walk` : `${h}h walk`;
-}
 
 function haversineKm(a: LatLng, b: LatLng): number {
   const R = 6371;
@@ -59,16 +27,6 @@ function haversineKm(a: LatLng, b: LatLng): number {
     Math.cos(a.latitude * Math.PI / 180) * Math.cos(b.latitude * Math.PI / 180) *
     Math.sin(dLng / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
-}
-
-function formatDistance(meters: number): string {
-  if (meters < 1000) return `${Math.round(meters)}m`;
-  return `${(meters / 1000).toFixed(1)}km`;
-}
-
-interface LatLng {
-  latitude: number;
-  longitude: number;
 }
 
 interface RouteMapPickerProps {
@@ -89,11 +47,23 @@ async function reverseGeocode(coord: LatLng): Promise<string> {
     const results = await Location.reverseGeocodeAsync(coord);
     if (results.length > 0) {
       const r = results[0];
-      return [r.name, r.street, r.district, r.city]
+      const label = [r.name, r.street, r.district, r.city]
         .filter(Boolean)
         .slice(0, 2)
         .join(', ');
+      if (label) return label;
     }
+  } catch {}
+  // The platform Geocoder is unavailable on many Android emulators/devices
+  // without Play services geocoding — fall back to ORS (Pelias) over HTTP.
+  try {
+    const url = `https://api.openrouteservice.org/geocode/reverse?api_key=${ORS_API_KEY}&point.lon=${coord.longitude}&point.lat=${coord.latitude}&size=1`;
+    const res = await fetch(url);
+    const props = (await res.json()).features?.[0]?.properties;
+    const label = [props?.name, props?.locality ?? props?.county]
+      .filter(Boolean)
+      .join(', ');
+    if (label) return label;
   } catch {}
   return `${coord.latitude.toFixed(4)}, ${coord.longitude.toFixed(4)}`;
 }
@@ -261,6 +231,7 @@ export const RouteMapPicker: React.FC<RouteMapPickerProps> = ({ visible, onClose
           provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : PROVIDER_DEFAULT}
           initialRegion={DEFAULT_REGION}
           onPress={handleMapPress}
+          onPoiClick={handleMapPress}
           showsUserLocation
           zoomEnabled
           zoomTapEnabled

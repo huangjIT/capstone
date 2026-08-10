@@ -64,6 +64,7 @@
             <artifactId>postgresql</artifactId>
             <scope>runtime</scope>
         </dependency>
+        <!-- In-memory DB so @SpringBootTest runs without Docker (see src/test/resources/application.yml) -->
         <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>

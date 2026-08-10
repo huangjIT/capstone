@@ -66,7 +66,7 @@ public class DashboardService {
     // Helper used by Micrometer gauges
     private double availableUsersCount() {
         try {
-            return userRepository.findByIsActiveTrue().size();
+            return userRepository.countByIsActiveTrue();
         } catch (Exception e) {
             return 0.0;
         }
@@ -89,7 +89,7 @@ public class DashboardService {
 
         // User metrics
         long totalUsers = userRepository.count();
-        long activeUsers = (long) userRepository.findByIsActiveTrue().size();
+        long activeUsers = userRepository.countByIsActiveTrue();
 
         // Telemetry metrics
         String telemetryCountStr = redisTemplate.opsForValue().get(TELEMETRY_COUNT_KEY);

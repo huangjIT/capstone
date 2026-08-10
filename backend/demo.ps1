@@ -18,9 +18,11 @@ try {
     exit 1
 }
 
-# 2) Register 10 users
+# 2) Register 10 users (register/login are the only endpoints that work without a
+#    token; every other /api/* call below authenticates with the token issued here)
 Write-Host "`n[2] Registering 10 users..."
 $userIds = New-Object System.Collections.ArrayList
+$userTokens = New-Object System.Collections.ArrayList
 $i = 0
 while ($i -lt 10) {
     $i++
@@ -38,14 +40,25 @@ while ($i -lt 10) {
     try {
         $result = Invoke-RestMethod -Uri "$baseUrl/api/users/register" -Method Post -Body $userJson -ContentType 'application/json' -TimeoutSec 10
         $userIds.Add($result.id) | Out-Null
+        $userTokens.Add($result.token) | Out-Null
         Write-Host "  User ${i}: ID=$($result.id)"
     } catch {
-        Write-Host "  User $i FAILED"
+        # Already registered from a previous run - log in to get a fresh token
+        try {
+            $loginJson = @{ email = "testuser$i@example.com"; password = "demopass123" } | ConvertTo-Json
+            $result = Invoke-RestMethod -Uri "$baseUrl/api/users/login" -Method Post -Body $loginJson -ContentType 'application/json' -TimeoutSec 10
+            $userIds.Add($result.id) | Out-Null
+            $userTokens.Add($result.token) | Out-Null
+            Write-Host "  User ${i}: ID=$($result.id) (existing, logged in)"
+        } catch {
+            Write-Host "  User $i FAILED"
+        }
     }
 }
 Write-Host "Registered: $($userIds.Count) users"
 
-# 3) Send 10 telemetry records
+# 3) Send 10 telemetry records — each user pings with their own token; the server
+#    takes the userId from the JWT, so the body only carries coordinates
 Write-Host "`n[3] Sending 10 telemetry records..."
 $teleCount = 0
 $j = 0
@@ -56,13 +69,13 @@ while ($j -lt 10) {
         $lon = -74.0060 + (0.01 * $j)
 
         $telemetryJson = @{
-            userId = $userId
             latitude = $lat
             longitude = $lon
         } | ConvertTo-Json
 
+        $headers = @{ Authorization = "Bearer $($userTokens[$j])" }
         try {
-            $result = Invoke-RestMethod -Uri "$baseUrl/api/telemetry/location" -Method Post -Body $telemetryJson -ContentType 'application/json' -TimeoutSec 10
+            $result = Invoke-RestMethod -Uri "$baseUrl/api/telemetry/location" -Method Post -Body $telemetryJson -ContentType 'application/json' -Headers $headers -TimeoutSec 10
             $teleCount++
             Write-Host "  Telemetry ${j}: sent for user $userId"
         } catch {
@@ -82,6 +95,7 @@ $matches = @(
     @{ lat = 40.7148; lon = -74.0080; pref = 1 }
 )
 
+$matchHeaders = @{ Authorization = "Bearer $($userTokens[0])" }
 foreach ($match in $matches) {
     $matchJson = @{
         searchLatitude = $match.lat
@@ -90,7 +104,7 @@ foreach ($match in $matches) {
     } | ConvertTo-Json
 
     try {
-        $result = Invoke-RestMethod -Uri "$baseUrl/api/match" -Method Post -Body $matchJson -ContentType 'application/json' -TimeoutSec 10
+        $result = Invoke-RestMethod -Uri "$baseUrl/api/match" -Method Post -Body $matchJson -ContentType 'application/json' -Headers $matchHeaders -TimeoutSec 10
         $matchCount++
         if ($result.userId) {
             Write-Host "  Match OK: User $($result.userId)"

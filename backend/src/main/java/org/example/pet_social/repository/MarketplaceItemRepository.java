@@ -19,4 +19,7 @@ public interface MarketplaceItemRepository extends JpaRepository<MarketplaceItem
 
     @EntityGraph(attributePaths = "seller")
     List<MarketplaceItem> findBySeller_IdOrderByCreatedAtDesc(Long sellerId);
+
+    // "Listings" stat on the Me tab: everything except withdrawn (active + sold still count)
+    long countBySeller_IdAndStatusNot(Long sellerId, String status);
 }

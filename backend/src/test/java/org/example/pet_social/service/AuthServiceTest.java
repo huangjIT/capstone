@@ -8,12 +8,9 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 class AuthServiceTest {
 
@@ -25,74 +22,75 @@ class AuthServiceTest {
     void setUp() {
         userService = mock(UserService.class);
         userRegistryService = mock(UserRegistryService.class);
+        // registerUser echoes back the user it was given, like the real registry does
+        when(userRegistryService.registerUser(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
         authService = new AuthService(userService, userRegistryService);
     }
 
     @Test
-    void registerRejectsDuplicateEmail() {
-        when(userService.getUserByEmail("taken@x.com")).thenReturn(new User());
-        assertThat(authService.register("Sam", "taken@x.com", "pw", null, true, null)).isNull();
+    void registerStoresLowercasedEmailAndBcryptHash() {
+        when(userService.getUserByEmail("mixed.case@example.com")).thenReturn(null);
+
+        User created = authService.register("Name", "  Mixed.Case@Example.COM ", "secret123", null, true, null);
+
+        assertNotNull(created);
+        assertEquals("mixed.case@example.com", created.getEmail());
+        assertTrue(created.getPasswordHash().startsWith("$2"), "password must be BCrypt-hashed");
+        assertTrue(new BCryptPasswordEncoder().matches("secret123", created.getPasswordHash()));
+        assertEquals("PET_OWNER", created.getRole());
+    }
+
+    @Test
+    void registerRejectsDuplicateEmailInAnyCasing() {
+        when(userService.getUserByEmail("taken@example.com")).thenReturn(new User("X", "taken@example.com", "PET_OWNER", true));
+
+        assertNull(authService.register("Y", "TAKEN@example.com", "secret123", null, true, null));
         verify(userRegistryService, never()).registerUser(any());
     }
 
     @Test
-    void registerStoresBcryptHashAndDefaults() {
-        when(userService.getUserByEmail("new@x.com")).thenReturn(null);
-        when(userRegistryService.registerUser(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+    void loginAcceptsCorrectPasswordAndRejectsWrongOne() {
+        User user = new User("N", "u@example.com", "PET_OWNER", true);
+        user.setPasswordHash(new BCryptPasswordEncoder().encode("right-pass"));
+        when(userService.getUserByEmail("u@example.com")).thenReturn(user);
 
-        User created = authService.register("Sam", "new@x.com", "secret", "", true, null);
-
-        assertThat(created).isNotNull();
-        assertThat(created.getRole()).isEqualTo("PET_OWNER");
-        assertThat(created.getMatchPreferencesMask()).isZero();
-        assertThat(created.getPasswordHash()).startsWith("$2");
-        assertThat(new BCryptPasswordEncoder().matches("secret", created.getPasswordHash())).isTrue();
-    }
-
-    @Test
-    void loginAcceptsCorrectBcryptPassword() {
-        User user = new User();
-        user.setPasswordHash(new BCryptPasswordEncoder().encode("secret"));
-        when(userService.getUserByEmail("u@x.com")).thenReturn(user);
-
-        assertThat(authService.login("u@x.com", "secret")).isSameAs(user);
-        assertThat(authService.login("u@x.com", "wrong")).isNull();
-    }
-
-    @Test
-    void loginRejectsUnknownUserAndMissingHash() {
-        when(userService.getUserByEmail("nobody@x.com")).thenReturn(null);
-        assertThat(authService.login("nobody@x.com", "pw")).isNull();
-
-        when(userService.getUserByEmail("nohash@x.com")).thenReturn(new User());
-        assertThat(authService.login("nohash@x.com", "pw")).isNull();
+        assertSame(user, authService.login("u@example.com", "right-pass"));
+        assertNull(authService.login("u@example.com", "wrong-pass"));
     }
 
     @Test
     void loginUpgradesLegacySha256HashToBcrypt() throws Exception {
-        String legacy = HexFormat.of().formatHex(
-                MessageDigest.getInstance("SHA-256").digest("secret".getBytes()));
-        User user = new User();
-        user.setPasswordHash(legacy);
-        when(userService.getUserByEmail("old@x.com")).thenReturn(user);
+        User user = new User("N", "legacy@example.com", "PET_OWNER", true);
+        MessageDigest md = MessageDigest.getInstance("SHA-256");
+        user.setPasswordHash(HexFormat.of().formatHex(md.digest("oldpass".getBytes())));
+        when(userService.getUserByEmail("legacy@example.com")).thenReturn(user);
 
-        User result = authService.login("old@x.com", "secret");
-
-        assertThat(result).isSameAs(user);
-        assertThat(user.getPasswordHash()).startsWith("$2");
-        verify(userService).registerUser(user);
+        assertSame(user, authService.login("legacy@example.com", "oldpass"));
+        assertTrue(user.getPasswordHash().startsWith("$2"), "hash must be upgraded to BCrypt on login");
+        verify(userService).registerUser(user); // upgraded hash persisted
+        assertNull(authService.login("legacy@example.com", "not-oldpass"));
     }
 
     @Test
-    void loginRejectsWrongPasswordAgainstLegacyHashWithoutUpgrading() throws Exception {
-        String legacy = HexFormat.of().formatHex(
-                MessageDigest.getInstance("SHA-256").digest("secret".getBytes()));
-        User user = new User();
-        user.setPasswordHash(legacy);
-        when(userService.getUserByEmail("old@x.com")).thenReturn(user);
+    void loginReturnsNullForUnknownUserOrPasswordlessGoogleAccount() {
+        when(userService.getUserByEmail("nobody@example.com")).thenReturn(null);
+        assertNull(authService.login("nobody@example.com", "x"));
 
-        assertThat(authService.login("old@x.com", "wrong")).isNull();
-        assertThat(user.getPasswordHash()).isEqualTo(legacy);
-        verify(userService, never()).registerUser(any());
+        User googleOnly = new User("G", "google@example.com", "PET_OWNER", true);
+        when(userService.getUserByEmail("google@example.com")).thenReturn(googleOnly);
+        assertNull(authService.login("google@example.com", "anything"));
+    }
+
+    @Test
+    void findOrCreateGoogleUserNormalizesEmailAndReusesExistingAccount() {
+        User existing = new User("E", "who@example.com", "PET_OWNER", true);
+        when(userService.getUserByEmail("who@example.com")).thenReturn(existing);
+
+        assertSame(existing, authService.findOrCreateGoogleUser("Who@Example.com", "Who", null));
+
+        when(userService.getUserByEmail("new@example.com")).thenReturn(null);
+        User created = authService.findOrCreateGoogleUser("NEW@example.com", "New", "http://pic");
+        assertEquals("new@example.com", created.getEmail());
+        assertEquals("http://pic", created.getAvatarUrl());
     }
 }

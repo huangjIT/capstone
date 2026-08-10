@@ -18,3 +18,4 @@ public class PetSocialApplication {
         return new ObjectMapper();
     }
 }
+

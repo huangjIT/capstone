@@ -3,8 +3,10 @@ import { View, Text, StyleSheet } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
 import { getFocusedRouteNameFromRoute } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/colors';
 import { useWalkBadge } from '../context/WalkBadgeContext';
+import { useTelemetryPing } from '../utils/telemetry';
 import { HomeMapScreen } from '../screens/HomeMapScreen';
 import { FindPartnersScreen } from '../screens/FindPartnersScreen';
 import { PetBlindDateScreen } from '../screens/PetBlindDateScreen';
@@ -18,6 +20,8 @@ import { PostMarketItemScreen } from '../screens/PostMarketItemScreen';
 import { MarketChatsScreen } from '../screens/MarketChatsScreen';
 import { EditInvitationScreen } from '../screens/EditInvitationScreen';
 import { ConnectPetProfileScreen } from '../screens/ConnectPetProfileScreen';
+import { CompletedWalksScreen } from '../screens/CompletedWalksScreen';
+import { CompletedDatesScreen } from '../screens/CompletedDatesScreen';
 
 const Tab = createBottomTabNavigator();
 
@@ -28,6 +32,7 @@ const WalkNavigator = () => (
     <WalkStack.Screen name="PostInvitation" component={PostInvitationScreen} />
     <WalkStack.Screen name="EditInvitation" component={EditInvitationScreen} />
     <WalkStack.Screen name="ConnectPetProfile" component={ConnectPetProfileScreen} />
+    <WalkStack.Screen name="CompletedWalks" component={CompletedWalksScreen} />
   </WalkStack.Navigator>
 );
 
@@ -47,6 +52,7 @@ const DateNavigator = () => (
     <DateStack.Screen name="PostDateInvitation" component={PostDateInvitationScreen} />
     <DateStack.Screen name="DatePetProfile" component={DatePetProfileScreen} />
     <DateStack.Screen name="EditDateInvitation" component={EditDateInvitationScreen} />
+    <DateStack.Screen name="CompletedDates" component={CompletedDatesScreen} />
   </DateStack.Navigator>
 );
 
@@ -106,17 +112,22 @@ const tabStyles = StyleSheet.create({
 
 export const TabNavigator: React.FC = () => {
   const { pendingCount, unreadMsgCount } = useWalkBadge();
+  const insets = useSafeAreaInsets();
+  // Report the signed-in user's position into the backend geo index while the app is open.
+  useTelemetryPing();
+  // Sit above the Android system navigation bar (edge-to-edge on Android 15+)
+  const tabBarStyle = {
+    backgroundColor: COLORS.card,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+    height: 72 + insets.bottom,
+    paddingBottom: 10 + insets.bottom,
+  };
   return (
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
-        tabBarStyle: {
-          backgroundColor: COLORS.card,
-          borderTopWidth: 1,
-          borderTopColor: COLORS.border,
-          height: 72,
-          paddingBottom: 10,
-        },
+        tabBarStyle,
         tabBarShowLabel: false,
       }}
     >
@@ -134,14 +145,12 @@ export const TabNavigator: React.FC = () => {
         component={WalkNavigator}
         options={({ route }) => {
           const routeName = getFocusedRouteNameFromRoute(route) ?? 'FindPartners';
-          const hideTabBar = ['ConnectPetProfile', 'PostInvitation', 'EditInvitation'].includes(routeName);
+          const hideTabBar = ['ConnectPetProfile', 'PostInvitation', 'EditInvitation', 'CompletedWalks'].includes(routeName);
           return {
             tabBarIcon: ({ focused }) => (
               <TabIcon emoji="🚶" label="Walk" focused={focused} badge={pendingCount > 0 || unreadMsgCount > 0} />
             ),
-            tabBarStyle: hideTabBar
-              ? { display: 'none' }
-              : { backgroundColor: COLORS.card, borderTopWidth: 1, borderTopColor: COLORS.border, height: 72, paddingBottom: 10 },
+            tabBarStyle: hideTabBar ? { display: 'none' as const } : tabBarStyle,
           };
         }}
       />
@@ -150,14 +159,12 @@ export const TabNavigator: React.FC = () => {
         component={DateNavigator}
         options={({ route }) => {
           const routeName = getFocusedRouteNameFromRoute(route) ?? 'PetBlindDate';
-          const hideTabBar = ['PostDateInvitation', 'DatePetProfile', 'EditDateInvitation'].includes(routeName);
+          const hideTabBar = ['PostDateInvitation', 'DatePetProfile', 'EditDateInvitation', 'CompletedDates'].includes(routeName);
           return {
             tabBarIcon: ({ focused }) => (
               <TabIcon emoji="💕" label="Date" focused={focused} />
             ),
-            tabBarStyle: hideTabBar
-              ? { display: 'none' }
-              : { backgroundColor: COLORS.card, borderTopWidth: 1, borderTopColor: COLORS.border, height: 72, paddingBottom: 10 },
+            tabBarStyle: hideTabBar ? { display: 'none' as const } : tabBarStyle,
           };
         }}
       />
@@ -171,9 +178,7 @@ export const TabNavigator: React.FC = () => {
             tabBarIcon: ({ focused }) => (
               <TabIcon emoji="🛍️" label="Market" focused={focused} />
             ),
-            tabBarStyle: hideTabBar
-              ? { display: 'none' }
-              : { backgroundColor: COLORS.card, borderTopWidth: 1, borderTopColor: COLORS.border, height: 72, paddingBottom: 10 },
+            tabBarStyle: hideTabBar ? { display: 'none' as const } : tabBarStyle,
           };
         }}
       />

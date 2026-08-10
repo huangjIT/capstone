@@ -45,6 +45,38 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
            "WHERE m.receiver.id = :userId AND m.sender.id = :otherUserId AND m.isRead = false")
     int markThreadRead(@Param("userId") Long userId, @Param("otherUserId") Long otherUserId);
 
+    // Unread badge counts grouped by thread kind (WALK_REQUEST / DATE_REQUEST / LISTING)
+    @Query("SELECT m.contextType, COUNT(m) FROM Message m " +
+           "WHERE m.receiver.id = :userId AND m.isRead = false AND m.contextType IS NOT NULL " +
+           "GROUP BY m.contextType")
+    List<Object[]> countUnreadGroupedByContextType(@Param("userId") Long userId);
+
+    // Unread per thread of one kind (e.g. per walk request id) for badges on cards
+    @Query("SELECT m.contextId, COUNT(m) FROM Message m " +
+           "WHERE m.receiver.id = :userId AND m.isRead = false AND m.contextType = :contextType " +
+           "GROUP BY m.contextId")
+    List<Object[]> countUnreadGroupedByContextId(@Param("userId") Long userId, @Param("contextType") String contextType);
+
+    // Whole thread by context alone (participants are enforced by the caller)
+    @Query("SELECT m FROM Message m JOIN FETCH m.sender JOIN FETCH m.receiver " +
+           "WHERE m.contextType = :contextType AND m.contextId = :contextId ORDER BY m.createdAt ASC")
+    List<Message> findByContext(@Param("contextType") String contextType, @Param("contextId") Long contextId);
+
+    // Total messages in one context thread — backs the 5-message cap while a walk/date request is still pending
+    long countByContextTypeAndContextId(String contextType, Long contextId);
+
+    // Mark everything sent to me inside one context thread as read
+    @Modifying
+    @Query("UPDATE Message m SET m.isRead = true, m.readAt = CURRENT_TIMESTAMP " +
+           "WHERE m.receiver.id = :userId AND m.contextType = :contextType AND m.contextId = :contextId AND m.isRead = false")
+    int markContextRead(@Param("userId") Long userId, @Param("contextType") String contextType, @Param("contextId") Long contextId);
+
+    // All marketplace chat messages involving one user (grouped into chats in MarketService)
+    @Query("SELECT m FROM Message m JOIN FETCH m.sender JOIN FETCH m.receiver " +
+           "WHERE m.contextType = 'LISTING' AND (m.sender.id = :userId OR m.receiver.id = :userId) " +
+           "ORDER BY m.createdAt DESC")
+    List<Message> findListingMessagesInvolving(@Param("userId") Long userId);
+
     // Find recent conversations for a user (latest message per unique partner, newest first).
     // Postgres requires the DISTINCT ON expression to match the first ORDER BY expression
     // exactly, which bind parameters break — so partner_id is computed once in a subquery.

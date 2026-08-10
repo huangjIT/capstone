@@ -27,4 +27,8 @@ public interface FriendshipRepository extends JpaRepository<Friendship, Long> {
     // Check if friendship exists between two users (either direction)
     @Query("SELECT f FROM Friendship f WHERE ((f.user.id = :userId1 AND f.friend.id = :userId2) OR (f.user.id = :userId2 AND f.friend.id = :userId1))")
     Optional<Friendship> findFriendshipBetween(@Param("userId1") Long userId1, @Param("userId2") Long userId2);
+
+    // Me-tab "friends" stat: accepted friendships in either direction
+    @Query("SELECT COUNT(f) FROM Friendship f WHERE (f.user.id = :userId OR f.friend.id = :userId) AND f.status = 'ACCEPTED'")
+    Long countAcceptedForUser(@Param("userId") Long userId);
 }

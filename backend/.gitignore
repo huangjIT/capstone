@@ -38,3 +38,9 @@ build/
 ### Docker Capstone Infrastructure ###
 postgres_data/
 
+### Runtime output (app.log / app.err, demo.ps1 metrics dumps) ###
+logs/
+
+### Local secrets — never commit ###
+.env
+

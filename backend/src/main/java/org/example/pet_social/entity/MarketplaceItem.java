@@ -34,16 +34,35 @@ public class MarketplaceItem {
     private Double originalPrice;
 
     @Column
-    private String condition; // NEW, LIKE_NEW, GOOD, SEALED
+    private String condition; // NEW, LIKE_NEW, GOOD, FAIR, SEALED
 
     @Column(nullable = false)
-    private String category; // TOY, CARRIER, FOOD, ACCESSORY
+    private String category; // TOY, CARRIER, FOOD, ACCESSORY, OTHER
 
     @Column(length = 2000)
     private String description;
 
+    // Photo URL uploaded client-side (Firebase Storage); emoji remains the fallback thumbnail.
+    // Always mirrors the first entry of imageUrls — kept for older clients/rows with one photo.
+    @Column(name = "photo_url")
+    private String photoUrl;
+
+    // Pipe-separated photo URLs (up to 5) — see PartnerInvitation.imageUrls for the same pattern
+    @Column(name = "image_urls", length = 2500)
+    private String imageUrls;
+
+    // Pickup location label + coordinates from the mobile app's post form
+    @Column
+    private String location;
+
+    @Column
+    private Double latitude;
+
+    @Column
+    private Double longitude;
+
     @Column(nullable = false)
-    private String status; // ACTIVE, RESERVED, SOLD
+    private String status; // ACTIVE, RESERVED, SOLD, WITHDRAWN
 
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
@@ -100,6 +119,21 @@ public class MarketplaceItem {
 
     public String getDescription() { return description; }
     public void setDescription(String description) { this.description = description; }
+
+    public String getPhotoUrl() { return photoUrl; }
+    public void setPhotoUrl(String photoUrl) { this.photoUrl = photoUrl; }
+
+    public String getImageUrls() { return imageUrls; }
+    public void setImageUrls(String imageUrls) { this.imageUrls = imageUrls; }
+
+    public String getLocation() { return location; }
+    public void setLocation(String location) { this.location = location; }
+
+    public Double getLatitude() { return latitude; }
+    public void setLatitude(Double latitude) { this.latitude = latitude; }
+
+    public Double getLongitude() { return longitude; }
+    public void setLongitude(Double longitude) { this.longitude = longitude; }
 
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
