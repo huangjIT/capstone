@@ -8,6 +8,30 @@
 > **Note on the Figma design:** the linked file (`figma.com/design/vMnjFIIFZn4yIJYpu59Nsz/pawpal`) could not be inspected — tried both the standard share link and the `m=dev` Dev Mode link. Figma renders entirely client-side and neither is accessible without an authenticated session or a personal access token. Everything below is derived from the codebase only. The "Pending" section flags where a real screen/field list from Figma would likely change priorities (profile pages, feed, chat, matching UI especially) — re-run this audit with Figma access (token, exported frames/screenshots, or a manual description) once available to validate it.
 >
 > **Update (2026-06-16, later same day):** items #1, #6, and #9 in Section 3, and the naming-residue list in Section 4.7, are now **RESOLVED** — see `TELEMETRY_ARCHITECTURE.md`/`README.md`'s "Recently completed" notes. All 8 PawPal entities now use real `@ManyToOne`/`@JoinColumn` FK relationships with DB constraints, indexes matching `DATABASE_SCHEMA.md`'s strategy, and `GenerationType.SEQUENCE` ids (for Hibernate batch-insert support). The driver/delivery naming (`capabilityMask`, `deliveryLatitude`/`deliveryLongitude`, `driverId` alias, `demo.ps1`'s `vehicleType`, `DashboardService`'s `dispatch.*` metrics) has been renamed throughout. Left as-is below for the historical record of what was found.
+>
+> **Update (2026-08-09):** several gaps recorded below are now closed. Body left unchanged, per the
+> convention above — this note is the current state. Full detail and rationale in
+> `SCALABILITY_REVIEW_2026-08-09.md`.
+>
+> - **§4.2 Security — largely resolved.** BCrypt + JWT exist, and the Bearer gate now covers **all
+>   of `/api/*`** with a small public allowlist (register/login/google + health), so it is
+>   deny-by-default rather than an enumerated list of protected paths. CORS is configured via
+>   `app.cors.allowed-origins`. `/api/test-data/*` and `/api/inspector/*` are gated behind
+>   `app.test-endpoints.enabled` and disabled in the AWS deployments — so the unbounded load
+>   generator noted below is no longer internet-reachable. **Rate limiting is still missing**, and
+>   login's unthrottled BCrypt (~100 ms CPU/attempt) remains the sharpest edge.
+> - **§4.3 Data integrity — resolved.** Bean Validation is in use on request DTOs, FK constraints
+>   exist, and **Flyway now owns the schema** (`ddl-auto: validate`), so migrations are versioned
+>   and reviewable. Enum-like `String` fields are still unconstrained.
+> - **§4.4 Testing — partially resolved.** 13 tests now (auth, user service, exception handling,
+>   context load), up from the single smoke test. Still no coverage for matching logic, telemetry
+>   processing, or dashboard aggregation — the highest-value gap remaining.
+> - **§4.7 Secrets — partially resolved.** `deploy/` uses `.env` + SSM Parameter Store;
+>   `docker-compose.aws.yml` still carries a plaintext JWT secret and should be rotated.
+> - **Redis key layout changed.** Section 1 below describes `users:meta:{id}` carrying `lastSeen`
+>   under a 6h TTL. That hash is now split: `users:meta:*` holds durable `active`/`preferences`
+>   with **no TTL**, and `users:presence:*` holds `lastSeen`/`available` and expires. The old
+>   single-key design silently made any user idle for 6h unmatchable.
 
 ---
 

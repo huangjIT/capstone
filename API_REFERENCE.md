@@ -15,10 +15,24 @@ pre-formatted by the server — so responses can be rendered without re-mapping.
 
 ```
 1. POST /api/auth/register (or /login)      → save `token`
-2. Send `Authorization: Bearer <token>` on every /api/matches and /api/messages call
-3. All other endpoints currently work without the header (will be locked down later —
-   send the header everywhere and you won't have to change anything)
+2. Send `Authorization: Bearer <token>` on EVERY /api/* call
+3. Only these work without it:
+     POST /api/auth/register | /api/auth/login | /api/auth/google
+     POST /api/users/register | /api/users/login   (legacy aliases)
+     GET  /api/system/health
 ```
+
+> **Changed 2026-08-09 — breaking.** The token used to be enforced only on `/api/matches` and
+> `/api/messages`. It now covers all of `/api/*`; anything else returns
+> `401 {"message":"Missing or invalid Bearer token"}`. Attach the header in one shared place
+> (fetch wrapper / axios interceptor) rather than per call.
+>
+> The gate is deny-by-default — it matches `/api/*` with the allowlist above rather than listing
+> protected paths, so new endpoints are protected the moment they exist and a forgotten one fails
+> loudly with a 401 instead of shipping open.
+>
+> **Identity now comes from the token, not the body.** `POST /api/telemetry/location` ignores any
+> `userId` you send. Stop sending `userId` to mean "who am I".
 
 ## Conventions
 
@@ -328,6 +342,44 @@ Deep-link rules:
 ### PUT `/api/notifications/read-all?userId=42` → `{ "updated": 5 }`
 ### POST `/api/notifications` — push a custom feed item (mostly for internal/testing use)
 
+### POST `/api/notifications/device-token` — register for Android/iOS push *(added 2026-08-09)*
+
+```json
+{ "token": "ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]", "platform": "ANDROID" }
+```
+→ `{ "status": "registered" }`
+
+Call on app launch **and** whenever the push service rotates the token. Idempotent: re-registering
+an existing token reassigns it to the current user rather than duplicating, so a shared device that
+changes accounts stops receiving the previous user's notifications. `platform` defaults to
+`ANDROID`.
+
+### DELETE `/api/notifications/device-token` — stop push on this device → 204
+
+Same body. Call on logout. Only the token's owner can retire it.
+
+#### What the client still has to do
+
+Registering a token is not sufficient on Android. The app must also create notification **channels**
+with these exact ids, because the backend sets `channelId` per category and Android silently drops
+notifications for a channel it doesn't know about — no error surfaces anywhere:
+
+| Channel id | Used for | Priority sent |
+|---|---|---|
+| `messages` | new chat messages | high |
+| `requests` | walk/date/invitation requests | high |
+| `social` | matches, reviews, marketplace | default |
+
+Each push carries a `data` payload for deep linking:
+
+```json
+{ "notificationId": "123", "category": "WALK_REQUEST", "relatedType": "MATCH", "relatedId": 42 }
+```
+
+Route on `relatedType`/`relatedId` the same way `NotificationDetail` already does for the in-app
+feed. Notifications also carry a `badge` count (the user's unread total) and a category-appropriate
+TTL, so a stale walk invite expires rather than surfacing hours later after the device wakes.
+
 ---
 
 ## 8. Reviews — `/api/reviews`
@@ -369,9 +421,12 @@ docker compose up -d          # Postgres 16, Redis Stack, Kafka, Prometheus, Gra
 ./mvnw spring-boot:run        # or mvnw.cmd on Windows — serves on :8080
 ```
 
-Tables are auto-created by Hibernate (`ddl-auto: update`). Demo data: use
-`POST /api/auth/register` + `POST /api/pets` + `POST /api/telemetry/location`,
-or the bulk generators under `/api/test-data/*` (see `backend/README.md`).
+Tables are created by **Flyway** on startup (`backend/src/main/resources/db/migration`);
+Hibernate runs with `ddl-auto: validate` and refuses to boot if entities and schema disagree.
+Demo data: use `POST /api/auth/register` + `POST /api/pets` + `POST /api/telemetry/location`,
+or the bulk generators under `/api/test-data/*` (see `backend/README.md`). The test-data and
+inspector endpoints are gated behind `app.test-endpoints.enabled` — on locally, off in deployed
+environments.
 
 ---
 
@@ -400,6 +455,14 @@ Kafka topic, so message/request POSTs never wait on notification writes.
 - Legacy endpoints (`/api/pets/nearby|partners|blind-dates`, `/api/invitations`,
   `/api/marketplace`, `/api/notifications`, …) still accept client-supplied ids for
   frontend1 compatibility; the mobile app should only use the token-derived endpoints above.
+  All of them now require the Bearer token even so.
 - Media upload (pet photos, listing photos, message images) — the mobile app uploads to
   Firebase Storage client-side and sends URL strings; there is still no server-side upload endpoint.
 - Social feed (posts/comments/friendships) has repositories but no endpoints (no Feed tab in the design).
+- No rate limiting; login performs unthrottled BCrypt (~100 ms CPU per attempt). Planned at the
+  WAF/ALB rather than in-app.
+- Chat is still poll-based; no WebSocket.
+- **Matching now requires live presence.** A user only appears as a walking partner if they have
+  pinged `POST /api/telemetry/location` recently (6h presence TTL). Seeding accounts without
+  sending telemetry for them will produce empty match results — that is intended behaviour, not a
+  bug. Set `app.matching.require-fresh-presence=false` for demos that need the old behaviour.

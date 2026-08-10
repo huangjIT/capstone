@@ -59,11 +59,19 @@ Android emulator reaches it at `http://10.0.2.2:8080` (already configured in
 
 ### 2. Auth caveats
 
-- **Token is only *enforced* on `/api/matches` and `/api/messages`.** Everything else
-  currently trusts the `userId` you send. **Send the Bearer header on every request
-  anyway** — when enforcement expands to all endpoints, your app won't need changes.
-- **No Google SSO** — the Login screen's Google button has no backend flow. Keep it
-  as "Coming Soon".
+- **⚠️ Changed 2026-08-09: the Bearer token is now enforced on ALL of `/api/*`.** The only
+  endpoints that work without one are `POST /api/auth/register|login|google`, their
+  `/api/users/register|login` aliases, and `GET /api/system/health`. Everything else returns
+  `401 {"message":"Missing or invalid Bearer token"}`.
+  **If any screen still calls the API without the header, it breaks now** — the previous advice to
+  "send it anyway" was the migration path, and this is that migration. Attach it in one place
+  (a shared fetch wrapper / axios interceptor) rather than per call.
+- **Identity comes from the token, not the body.** `POST /api/telemetry/location` ignores any
+  `userId` you send and uses the authenticated user — so the body is just `{latitude, longitude}`.
+  Assume the same direction of travel elsewhere: stop sending `userId` for "who am I".
+- **Google SSO now exists** — `POST /api/auth/google` with `{ "idToken": "..." }` verifies the
+  Google token, finds or creates the account, and returns the same `{token, userId, ...}` shape as
+  login. The Login screen's Google button can be wired up.
 - **No token refresh / logout endpoint.** Token lives 7 days; on any 401, clear the
   stored token and route to Login. "Logout" = delete the token client-side.
 - Passwords: min 6 chars enforced server-side; error messages are human-readable.
@@ -119,10 +127,13 @@ endpoints** (the current 20-screen design has no Feed tab, so this was depriorit
 ### 10. Scale/quality debt (doesn't block the demo)
 
 - No pagination on list endpoints (full lists returned) — fine at demo scale.
-- No rate limiting; `/api/test-data/*` load generators are wide open — don't expose this deployment publicly.
-- CORS is allow-all (dev config).
-- Schema is Hibernate `ddl-auto: update`, no Flyway migrations yet.
-- Test suite is the Postman collection + one Spring context test; no unit/integration coverage.
+- No rate limiting. `/api/test-data/*` and `/api/inspector/*` are now gated behind
+  `app.test-endpoints.enabled` and switched off in the AWS deployments, so the load generators are
+  no longer wide open — but login still does unthrottled BCrypt.
+- CORS is configurable via `app.cors.allowed-origins` (still permissive in dev config).
+- Schema is owned by **Flyway** (`backend/src/main/resources/db/migration`) with
+  `ddl-auto: validate` — the app refuses to start if entities and schema disagree.
+- Test suite is the Postman collection + 13 JVM tests; still no coverage of matching or telemetry.
 - Enum-ish values validated at the API layer only, stored as free strings in the DB.
 - `frontend/src` (the older web-style wiring) doesn't send Bearer tokens and predates
   matches/messages/reviews — **treat `frontend/mobile` + `API_REFERENCE.md` as the
@@ -151,8 +162,13 @@ endpoints** (the current 20-screen design has no Feed tab, so this was depriorit
 ## Suggested backend priorities after handoff (for whoever picks it up)
 
 1. `PUT /api/users/{id}` + profile fields, `PUT/DELETE /api/pets/{id}` — unblocks the Me tab
-2. Enforce Bearer on all `/api/**` (frontend is already instructed to send it)
+2. ~~Enforce Bearer on all `/api/**`~~ — **done 2026-08-09** (see §2 above)
 3. Activity-stats endpoint for the Me tab
-4. WebSocket or polling-contract hardening for chat, then push notifications
+4. WebSocket or polling-contract hardening for chat
+5. ~~Push notifications~~ — **backend done 2026-08-09.** Remaining work is client-side: register the
+   Expo push token at `POST /api/notifications/device-token` on launch and on rotation, `DELETE` it
+   on logout, and create Android channels with ids `messages`, `requests`, `social`. Channel ids
+   that don't match are dropped silently by Android, with no error anywhere — this is the single
+   easiest way to "implement push" and see nothing arrive.
 5. Media upload (S3/local) for pet & listing photos
 6. Flyway + pagination + real test suite (pre-req for the Sprint-4 50k-user load test)

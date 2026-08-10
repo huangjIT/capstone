@@ -23,8 +23,8 @@ If you're looking for pet profiles, a social feed, or messaging *endpoints*, the
 ### Core Technologies
 
 - **Spring Boot 4.0.6** (Java 21)
-- **PostgreSQL 16** — persistence (`spring.jpa.hibernate.ddl-auto=update`, auto-creates schema from entities)
-- **Redis Stack** — geospatial indexing (`users:geo`) & per-user metadata cache
+- **PostgreSQL 16** — persistence, schema owned by **Flyway** (`ddl-auto: validate`)
+- **Redis Stack** — geospatial indexing (`users:geo`), durable match metadata (`users:meta:*`) and expiring presence (`users:presence:*`)
 - **Apache Kafka 7.5.0** (KRaft mode, single broker) — telemetry message streaming
 - **Prometheus + Grafana** — metrics & monitoring
 - **Docker Compose** — infrastructure orchestration
@@ -91,11 +91,30 @@ There's also a smoke-test script, `demo.ps1`, that walks the whole flow (health 
 
 ## 🔌 API Endpoints
 
-Everything below is implemented today. There are **no endpoints** for Pet, Post, Comment, Event, Message, Friendship, or PetMatch yet — only their entities/repositories exist.
+### Authentication (read this first)
+
+**All of `/api/*` requires `Authorization: Bearer <token>`.** The only exceptions are the
+endpoints that mint a token and the health probe:
+
+```
+POST /api/auth/register        POST /api/users/register   (legacy alias)
+POST /api/auth/login           POST /api/users/login      (legacy alias)
+POST /api/auth/google
+GET  /api/system/health
+```
+
+Everything else returns `401 {"message":"Missing or invalid Bearer token"}` without one. The gate
+is deny-by-default: it matches `/api/*` with the small allowlist above, rather than an enumerated
+list of protected paths, so a newly added controller is protected the moment it exists. A forgotten
+endpoint now fails visibly with a 401 instead of shipping open.
+
+Beyond the matching/telemetry surface documented here, the app also serves pets, walks, dates,
+marketplace, messaging, reviews, invitations and notifications — see `API_REFERENCE.md` at the
+repository root for the full list.
 
 ### Health Check
 ```bash
-GET /api/system/health
+GET /api/system/health          # public
 ```
 
 ### User Registration
@@ -115,15 +134,20 @@ Content-Type: application/json
 ### Location Telemetry
 ```bash
 POST /api/telemetry/location
+Authorization: Bearer <token>
 Content-Type: application/json
 
 {
-  "userId": 1,
-  "latitude": 40.7128,
-  "longitude": -74.0060
+  "latitude": 43.6532,
+  "longitude": -79.3832
 }
 ```
-Returns `202 Accepted` once queued onto the Kafka topic `user-telemetry`; a consumer asynchronously writes it into the Redis geo index and updates user metadata.
+The user id comes from the verified token, **not the body** — a client can only ever report its own
+position. Any `userId` sent in the body is ignored (it used to be trusted, which let anyone write
+anyone else's location).
+
+Returns `202 Accepted` once queued onto the Kafka topic `user-telemetry`; a consumer asynchronously
+writes it into the Redis geo index and refreshes `users:presence:{userId}`.
 
 ### Find Match
 ```bash
@@ -138,6 +162,16 @@ Content-Type: application/json
 ```
 Returns `{"userId": <id>}` (200) or `{"message": "no-match"}` (404).
 
+### Push Notification Registration
+```bash
+POST   /api/notifications/device-token     # body: { "token": "ExponentPushToken[...]", "platform": "ANDROID" }
+DELETE /api/notifications/device-token     # body: { "token": "..." } — call on logout
+```
+Register on launch and whenever the push service rotates the token; registration is idempotent and
+reassigns a token that already exists, so a shared device changing accounts stops receiving the
+previous user's notifications. The client must also create Android channels with ids `messages`,
+`requests` and `social` — the OS silently drops notifications for a channel it doesn't know.
+
 ### Test Data Generation
 ```bash
 POST /api/test-data/users?count=100
@@ -147,6 +181,9 @@ GET  /api/test-data/stats
 POST /api/test-data/telemetry/single      # synchronous single-record processing, body: UserLocation
 POST /api/test-data/telemetry/bulk        # synchronous bulk processing, body: UserLocation[]
 ```
+Gated behind `app.test-endpoints.enabled` (default `true` locally, forced `false` in the AWS
+deployments). `/stream` spawns producer threads on demand, so on an internet-reachable box it lets
+anyone run a load test against you. `/api/inspector/*` is gated by the same flag.
 
 ### Dashboard
 ```bash
@@ -172,7 +209,15 @@ CREATE TABLE users (
 );
 ```
 
-Schema is created/updated automatically by Hibernate (`ddl-auto: update`) from the JPA entities — there are no migration scripts (e.g. Flyway/Liquibase) in the project.
+Schema is owned by **Flyway** (`src/main/resources/db/migration`), not Hibernate. `ddl-auto` is
+`validate`, so the app refuses to start if the entities and the migrated schema disagree, instead
+of silently altering tables at boot.
+
+`V1__baseline_schema.sql` was generated from the JPA metadata with Hibernate's schema exporter, so
+it matches the entities exactly. Databases created before Flyway landed have tables but no
+`flyway_schema_history`; `baseline-on-migrate` marks them as already at V1 and skips it, which is
+why anything new (like `device_tokens`) lives in **V2 onward** — otherwise those databases would
+never receive it. A fresh database runs V1 then V2 and lands in the same place.
 
 In addition to `users`, eight more tables exist as JPA entities + Spring Data repositories, now with real foreign-key relationships and indexes, but **no service or controller layer wired up yet**: `pets`, `friendships`, `posts`, `comments`, `events`, `event_attendees`, `messages`, `pet_matches`. Full column-level documentation, sample data, ERD, and indexes for all nine tables live in [`DATABASE_SCHEMA.md`](DATABASE_SCHEMA.md).
 
@@ -185,16 +230,30 @@ Type: GEOSPATIAL (Redis GEO commands)
 Purpose: Store user locations for radius searches
 ```
 
-**User Metadata:**
+**User Metadata (durable — no TTL):**
 ```
 Key: users:meta:{userId}
 Type: HASH
 Fields:
   - active: true/false
-  - capability: bitmask (long)
-  - lastSeen: epoch milliseconds
-TTL: 6 hours
+  - preferences: bitmask (long)
+TTL: none
 ```
+
+**Presence (volatile — expiry is the point):**
+```
+Key: users:presence:{userId}
+Type: HASH
+Fields:
+  - lastSeen: epoch milliseconds
+  - available: true/false
+TTL: 6 hours, refreshed by every telemetry ping
+```
+
+These were one key until 2026-08-09. The per-ping `EXPIRE` took the registration-written
+matching fields with it, so any user idle for six hours silently became unmatchable. Splitting
+by lifetime fixes that and makes the expiry meaningful: no ping means not out walking, which is
+exactly what matching should treat as unavailable.
 
 **Metrics:**
 ```
@@ -295,19 +354,36 @@ curl -X POST "http://localhost:8080/api/test-data/telemetry?count=10000&maxUserI
 
 ## 🎯 Matching Algorithm
 
-`MatchingService` performs geospatial searches against the Redis `users:geo` index with escalating radii:
+`MatchingService` performs geospatial searches against the Redis `users:geo` index with escalating
+radii, **nearest-first and capped** at each step:
 
-1. **Search Radius 1:** 2km
-2. **Search Radius 2:** 5km (if no match found)
-3. **Search Radius 3:** 10km (if no match found)
+| Step | Radius | Candidate cap |
+|---|---|---|
+| 1 | 2 km | 50 |
+| 2 | 5 km | 100 |
+| 3 | 10 km | 200 |
+
+The cap has to grow with the radius. Results come back nearest-first, so widening the search while
+keeping the same cap would return the same nearest members that already failed the filter, making
+the expansion pointless. Capping at all matters because an unbounded 10 km search in Toronto covers
+most of the city — the search used to be unbounded, with a separate blocking `HGETALL` per
+candidate, which is O(city population) round-trips for a single match request.
 
 ### Filtering Criteria
 
-For each candidate within radius (loaded from `users:meta:{userId}`):
-- ✅ `active == true`
-- ✅ `(candidate.capability & required.capability) == required.capability`
+Candidate metadata for a radius is fetched in **one pipelined round-trip**, then each candidate
+must satisfy:
+- ✅ a live `users:presence:{userId}` key — i.e. pinged recently, so actually out walking
+- ✅ `active == true` (from `users:meta:{userId}`)
+- ✅ `(candidate.preferences & required.preferences) == required.preferences`
 
-Returns the first matching user found within the smallest satisfied radius (200) or 404 `no-match`. Every call increments a `dashboard` success/failure counter via `DashboardService`.
+The presence check is what connects matching to the telemetry pipeline; before it, matching read
+only registration-time fields and ignored telemetry entirely. Disable with
+`app.matching.require-fresh-presence=false` for demos that seed users without streaming telemetry
+for them.
+
+Returns the nearest matching user within the smallest satisfied radius, or 404 `no-match`. Every
+call increments a success/failure counter via `DashboardService`.
 
 **Implementation:** `src/main/java/org/example/pet_social/service/MatchingService.java`
 
@@ -434,14 +510,41 @@ java -version  # Should be 21+
 - Indexes added on every FK column and the query patterns `DATABASE_SCHEMA.md` documents (Postgres doesn't auto-index FK columns, so this is a real perf fix, not just integrity).
 - All 9 entities switched from `GenerationType.IDENTITY` to `GenerationType.SEQUENCE`, which is required for Hibernate's JDBC batch inserts (`hibernate.jdbc.batch_size`, now configured in `application.yml`) to actually take effect.
 
+### Recently completed (2026-08-09)
+
+See [`SCALABILITY_REVIEW_2026-08-09.md`](SCALABILITY_REVIEW_2026-08-09.md) for the full review and
+rationale.
+
+- **Matching bounded and pipelined** — nearest-first `GEOSEARCH` with growing per-radius caps, and
+  one pipelined round-trip for candidate metadata instead of an `HGETALL` per candidate.
+- **Auth is deny-by-default** — the JWT filter covers all of `/api/*` with a small public allowlist
+  (register/login/google + the health probe), replacing an enumerated list where any forgotten
+  endpoint shipped open. Telemetry identity now comes from the verified token, not the request body.
+- **Flyway owns the schema**, `ddl-auto: validate`.
+- **Redis keys split by lifetime** — durable `users:meta:*`, expiring `users:presence:*`.
+- **Android push notifications** via Expo/FCM, delivered off the Kafka `app-events` pipeline.
+- **Multi-node deployment** — 2-node + witness topology in [`deploy/`](deploy/README.md).
+- **Metrics for the previously invisible** — Kafka batch-size distribution, telemetry parse/batch
+  error counters, push delivery counters.
+
 ### Known Issues
-1. **No authentication:** no Spring Security, JWT, or any auth/authz exists anywhere in the codebase. All endpoints are public.
-2. **Hardcoded secrets:** DB/Redis/Kafka credentials are plaintext in `application.yml` and `docker-compose.yml`.
-3. **No tests beyond a context-load smoke test.**
-4. **No schema migrations:** relies on Hibernate `ddl-auto: update`; there's no Flyway/Liquibase, so schema history isn't tracked or repeatable across environments. Since `update` only adds constraints (never retrofits them destructively), run `docker compose down -v` before the next `spring-boot:run` so the new FKs/indexes/sequences get created against a fresh schema.
-5. **PawPal entities are unreachable via HTTP:** `Pet`, `Post`, `Comment`, `Event`, `EventAttendee`, `Message`, `Friendship`, `PetMatch` all have entities + repositories but no services or controllers. The matching engine also still operates on generic `User` records rather than real `Pet` profiles — wiring it to the PawPal domain (once that has a service layer) is the main remaining integration gap.
-6. **Reverse-pair duplicates still possible:** `Friendship`'s and `PetMatch`'s unique constraints only block the exact ordered pair, not the swapped one — needs service-layer validation that doesn't exist yet.
-7. **Enum-like fields are still plain `String`:** `role`, `status`, `species`, etc. have no `@Enumerated` or `@Pattern` validation.
+1. **Hardcoded secrets:** `docker-compose.aws.yml` still carries a plaintext JWT secret and DB
+   password. Rotate before any public deployment; `deploy/` uses `.env` + SSM instead.
+2. **No rate limiting:** login performs unthrottled BCrypt (~100 ms CPU per attempt), a cheap
+   CPU-exhaustion vector. Best placed at the WAF/ALB.
+3. **No dead-letter topic:** telemetry processing is deliberately at-most-once (the next ping
+   supersedes a lost one), and error counters now make failures visible, but poison messages are
+   still dropped rather than parked.
+4. **Ingest ceiling unmeasured:** ~720–1,000 records/sec on a laptop is the last real number. The
+   5–10k/sec/node target is unvalidated; the batch-size metric and fixed generator pacing exist
+   now to settle it.
+5. **Single Kafka broker at RF 1**, and all writes funnel to one Redis primary — replicas are
+   failover, not write capacity. Scaling writes needs `users:geo` sharded by city tile, since one
+   key lives on one shard regardless of cluster size.
+6. **Reverse-pair duplicates still possible:** `Friendship`'s and `PetMatch`'s unique constraints
+   only block the exact ordered pair, not the swapped one — needs service-layer validation.
+7. **Enum-like fields are still plain `String`:** `role`, `status`, `species`, etc. have no
+   `@Enumerated` or `@Pattern` validation.
 
 ### Matching Preferences Bitmask Reference (matching engine only)
 
@@ -477,16 +580,20 @@ This bitmask is unrelated to the PawPal domain (`Pet`, `Post`, etc.) — it's so
 - [ ] Pet compatibility matching algorithm
 
 ### Phase 3: User Experience
-- [ ] Mobile app (React Native/Flutter)
-- [ ] Real-time messaging (WebSocket)
+- [x] Mobile app (React Native / Expo — see `frontend/mobile`)
+- [ ] Real-time messaging (WebSocket) — messaging currently polls
 - [ ] Event management + RSVP flow
-- [ ] Push notifications (FCM/APNS)
+- [x] Push notifications (FCM via Expo) — backend complete; the client still needs to register its
+      token at `POST /api/notifications/device-token` and create Android channels `messages`,
+      `requests`, `social` (mismatched channel ids are dropped silently by the OS)
 
 ### Phase 4: Production Readiness
 - [ ] Comprehensive test suite (unit + integration)
-- [ ] Schema migrations (Flyway/Liquibase) instead of `ddl-auto: update`
+- [x] Schema migrations (Flyway) instead of `ddl-auto: update`
 - [ ] CI/CD pipeline (GitHub Actions)
-- [ ] Cloud deployment (AWS/GCP/Azure)
+- [x] Cloud deployment — 2-node + witness topology in [`deploy/`](deploy/README.md)
+- [ ] Rate limiting at the edge (WAF/ALB)
+- [ ] Load test at the 50k-user target, with p95/p99 captured
 - [ ] Load testing & optimization
 - [ ] Security audit
 

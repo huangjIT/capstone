@@ -436,6 +436,41 @@ running average and is recomputed by `ReviewController` on every write.
 
 ---
 
+### 13. DEVICE_TOKENS
+
+**Purpose:** Android/iOS push targets (Expo push tokens, which front FCM). One row per app
+installation; `PushNotificationService` fans a notification out to a user's active tokens.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| id | BIGSERIAL | PRIMARY KEY | Auto-incrementing token ID |
+| user_id | BIGINT | NOT NULL, FK → users.id | Owning user |
+| token | VARCHAR(512) | NOT NULL, UNIQUE | `ExponentPushToken[...]` or raw FCM token |
+| platform | VARCHAR(16) | NOT NULL | ANDROID / IOS |
+| active | BOOLEAN | NOT NULL | False once the push service reports it dead |
+| created_at | TIMESTAMP | | First registration |
+| last_seen_at | TIMESTAMP | | Refreshed on every re-registration |
+
+**Constraints:**
+- UNIQUE (token) — the *token* is the identity, not the user. Registering an existing token
+  reassigns its owner rather than inserting a duplicate, so a shared phone that changes accounts
+  stops receiving the previous user's notifications.
+
+**Indexes:**
+- PRIMARY KEY on `id`
+- UNIQUE INDEX on `token` (`uk_device_tokens_token`)
+- INDEX on `(user_id, active)` (`idx_device_tokens_user`) — `active` is in the index so dead
+  tokens from uninstalls never reach the heap during delivery
+
+**Lifecycle:** rows are deactivated, never deleted, when the push service returns
+`DeviceNotRegistered` (uninstall or token rotation). Keeping the row makes delivery history
+interpretable and prevents an immediate re-insert of the same dead token.
+
+**Migration:** created by `V2__add_device_tokens.sql`, not the V1 baseline — see
+[Database Initialization](#database-initialization) for why.
+
+---
+
 ## Data Relationships
 
 ### One-to-Many Relationships
@@ -589,16 +624,31 @@ Type: GEO
 Purpose: Real-time location tracking for nearby user discovery
 ```
 
-### 2. User Metadata Cache
+### 2. User Metadata (durable)
 ```
 Key Pattern: users:meta:{userId}
 Type: HASH
 Fields:
   - active: boolean
   - preferences: long
-  - lastSeen: timestamp
-TTL: 6 hours
+TTL: none — these are profile facts, written at registration
 ```
+
+### 2b. Presence (volatile)
+```
+Key Pattern: users:presence:{userId}
+Type: HASH
+Fields:
+  - lastSeen: epoch millis
+  - available: boolean
+TTL: 6 hours, refreshed by every telemetry ping
+```
+
+These were a single key until 2026-08-09. The per-ping `EXPIRE` also expired the
+registration-written `active`/`preferences` fields, so a user idle for six hours silently became
+unmatchable. Splitting them by lifetime fixes that and gives the TTL a clear meaning: presence
+expiring *is* the signal that someone is no longer out walking, which is what matching now filters
+on.
 
 ### 3. Metrics
 ```
@@ -623,14 +673,28 @@ docker-compose up -d
 psql -h localhost -U admin -d pet_social_db
 ```
 
-### Step 3: Hibernate Auto-DDL
-Spring Boot with `spring.jpa.hibernate.ddl-auto=update` will automatically create tables from entities.
+### Step 3: Flyway migrations
+Flyway owns the schema and runs on startup from `src/main/resources/db/migration`. Hibernate is set
+to `ddl-auto: validate`, so the app **fails to start** if the entities and the migrated schema
+disagree, rather than silently altering tables.
 
-### Step 4: Manual Schema Creation (Optional)
-For production environments, generate migration scripts:
+- `V1__baseline_schema.sql` — the pre-Flyway schema, generated from the JPA metadata with
+  Hibernate's schema exporter (so it matches the entities, not a recollection of them).
+- `V2__add_device_tokens.sql` — push-notification targets.
+
+Databases created before Flyway have tables but no `flyway_schema_history`. `baseline-on-migrate`
+marks those as already at V1 and skips it — which is exactly why anything new must land in **V2 or
+later**, or those databases would never receive it. A fresh database runs V1 then V2.
+
+Check state with:
 ```bash
-./mvnw spring-boot:run -Dspring-boot.run.arguments=--spring.jpa.hibernate.ddl-auto=validate
+psql -h localhost -U admin -d pet_social_db \
+  -c 'select version, description, success from flyway_schema_history order by installed_rank'
 ```
+
+### Step 4: Adding a migration
+Never edit an applied migration — Flyway checksums them and will refuse to start on a mismatch.
+Add `V3__...sql` instead, and update the entities to match in the same commit.
 
 ---
 
@@ -782,11 +846,13 @@ VACUUM ANALYZE posts;
 4. ✅ Match request flow (connect → accept/deny/block) with reverse-pair guard
 5. ✅ MessageController with match/listing thread scoping
 6. ✅ Reviews + aggregate pet rating
-7. ✅ BCrypt + JWT (enforced on /api/matches and /api/messages; see API_REFERENCE.md)
-8. ⏳ Enforce Bearer token on all /api/** endpoints (full Spring Security)
+7. ✅ BCrypt + JWT (see API_REFERENCE.md)
+8. ✅ Bearer token enforced on all /api/** endpoints (deny-by-default allowlist in `JwtAuthFilter`)
 9. ⏳ Media upload (pet/listing/message photos)
 10. ⏳ Posts/comments/friendships service layer (no Feed tab in current design)
-11. ⏳ Flyway migrations replacing ddl-auto: update
+11. ✅ Flyway migrations replacing ddl-auto: update
+12. ✅ `device_tokens` table + Android push delivery (Expo/FCM)
+13. ⏳ Rate limiting at the edge; dead-letter topic for poison telemetry
 
 ---
 

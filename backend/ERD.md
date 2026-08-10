@@ -28,6 +28,16 @@ erDiagram
         bigint capability_mask "ORPHANED - superseded by match_preferences_mask"
     }
 
+    DEVICE_TOKENS {
+        bigint id PK
+        bigint user_id FK
+        varchar token UK "Expo/FCM token - the identity, so re-registering reassigns the owner"
+        varchar platform "ANDROID | IOS"
+        boolean active "false once the push service reports it dead"
+        timestamp created_at
+        timestamp last_seen_at
+    }
+
     PETS {
         bigint id PK
         bigint owner_id FK
@@ -147,6 +157,7 @@ erDiagram
     }
 
     USERS ||--o{ PETS : owns
+    USERS ||--o{ DEVICE_TOKENS : "registers (push targets)"
     USERS ||--o{ POSTS : writes
     PETS  |o--o{ POSTS : "featured in"
     POSTS ||--o{ COMMENTS : has

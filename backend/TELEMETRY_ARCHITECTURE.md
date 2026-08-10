@@ -55,14 +55,14 @@
 └───────┬─────────────────────────────────────────┬─────────────────────┘
         ▼                                           ▼
 ┌──────────────────────────┐          ┌──────────────────────────────────┐
-│ REDIS (hot/ephemeral)     │          │ POSTGRESQL (durable/ACID)         │
-│ - GEO index: pets:geo     │          │ - users, pets, friendships, posts,│
+│ REDIS (hot state)         │          │ POSTGRESQL (durable/ACID)         │
+│ - GEO index: users:geo    │          │ - users, pets, friendships, posts,│
 │   (GEOADD/GEOSEARCH)      │          │   events, messages, pet_matches   │
-│ - meta hash per pet,      │          │ - telemetry_events: partitioned   │
-│   6h TTL (online/avail.)  │          │   by day, append-only history     │
-│ - rate-limit counters     │          │ - FK constraints + CHECK/enum     │
-└──────────────────────────┘          │   constraints (gap in current     │
-                                        │   entities — see PROGRESS.md §3)  │
+│ - users:meta:*  durable,  │          │ - schema owned by Flyway          │
+│   no TTL (active/prefs)   │          │   (ddl-auto: validate)            │
+│ - users:presence:* 6h TTL │          │ - telemetry_events: partitioned   │
+│   (lastSeen/available)    │          │   by day, append-only history     │
+└──────────────────────────┘          │ - FK constraints on all relations │
                                         └──────────────────────────────────┘
                                  ▲
                                  │ async, off the write path
@@ -87,6 +87,14 @@ Redis command latency, JVM GC pause time, p50/p95/p99 ingestion latency.
 4. **Kafka durably buffers and orders the stream.** Partitioning by `petId` (not by geohash/region) guarantees per-pet ordering without creating a hot partition out of a popular dog park. Partition count scales independently per topic based on its volume (telemetry needs many partitions; community-events needs few).
 5. **Consumers process in micro-batches.** Each consumer group (`pet-telemetry-group`, `nfc-group`, `community-group`) polls up to 1000 records per call. For telemetry: dedupe by `(petId, clientEventId)`, pipeline a `GEOADD` + `HSET` per record into Redis in one round trip, then flush the whole batch to Postgres via a single batched JDBC insert (or `COPY`) into the partitioned `telemetry_events` table. This is the single biggest gap versus today's PoC: `TelemetryConsumerService.processTelemetry()` (`TelemetryConsumerService.java:58`) currently does two separate Redis calls per record and never writes to Postgres at all — it's GEO-index-only, which is fine for a PoC but won't survive the load test in Sprint 4 without batching.
 6. **Hot state vs. durable history are deliberately separate stores.** Redis answers "where is this pet *right now*" (GEOSEARCH, ephemeral, TTL-bounded). Postgres answers "what happened historically" (walk paths, health correlations, AI-insight inputs) and is the source of truth for anything that must survive a Redis restart.
+
+7. **Inside Redis, keys are separated by lifetime too.** `users:meta:*` holds durable profile facts
+   (`active`, `preferences`) with **no TTL**; `users:presence:*` holds `lastSeen`/`available` and is
+   refreshed by every ping under a 6h TTL. These were one hash until 2026-08-09, and the per-ping
+   `EXPIRE` silently took the matching fields with it — any user idle for six hours became
+   unmatchable. The split also gives expiry a meaning worth relying on: no ping means not out
+   walking, which is now a filter condition in `MatchingService` rather than something matching
+   ignored entirely.
 7. **Side effects fan out asynchronously, off the critical path.** Community-event consumers publish to Redis Pub/Sub (or a lightweight WebSocket service subscribed to it) so nearby clients see a new sighting/alert on the live map within ~1s. Walk-completion events get published to a separate `ai-insight-triggers` topic so the (potentially slow) AI insight generation never blocks or competes with ingestion throughput.
 
 ---
@@ -148,11 +156,12 @@ Extends the Micrometer/Prometheus/Grafana stack already present (`DashboardServi
 | Lever | Current PoC state | Target |
 |---|---|---|
 | GC | ZGC already configured (`Dockerfile:40`) | Keep — sub-ms pauses matter under sustained write load |
-| Kafka producer | Default `batch.size`/`linger.ms` | Tune `linger.ms≈5-10ms`, enable `lz4` compression for 5-10k events/sec/node |
-| Redis writes | Two round trips per event (`GEOADD` then `HSET`) | Pipeline into one round trip |
-| Postgres writes | None today (Redis-only) | Batched JDBC insert (`hibernate.jdbc.batch_size`, already configured in `application.yml` along with `GenerationType.SEQUENCE` on every entity — IDENTITY ids silently disable Hibernate batching) or `COPY` per micro-batch, not per-row |
-| Connection pooling | Explicit HikariCP sizing now set in `application.yml` (`maximum-pool-size: 20`, `minimum-idle: 5`) | Re-tune against the actual Sprint 4 load test results — today's values are a starting point, not measured |
-| Consumer concurrency | Fixed `concurrency=3` (`TelemetryConsumerService.java:38`) | Scale to match partition count per topic as throughput grows |
+| Kafka producer | **Done** — `linger.ms: 5`, `batch.size: 32768`, `compression.type: lz4` | Re-tune against a real load test |
+| Redis writes | **Done** — one `executePipelined` call per Kafka *batch* (not per event), covering `GEOADD`+`HSET`+`EXPIRE` for every record plus a single `INCR` | Benchmark Redis directly for this write pattern (4 ops/record → 200k ops/sec at a 50k/sec target) before sizing partitions |
+| Postgres writes | None on the telemetry path (Redis-only) | Batched JDBC insert (`hibernate.jdbc.batch_size`, configured, with `GenerationType.SEQUENCE` on every entity — IDENTITY ids silently disable Hibernate batching) or `COPY` per micro-batch |
+| Connection pooling | HikariCP `maximum-pool-size: 20`, `minimum-idle: 5`; Tomcat request threads now capped at 50 to match | Re-tune both together against the load test, and check the total against Postgres `max_connections` before running a second app instance |
+| Consumer concurrency | Driven by `app.kafka.telemetry-partitions` (default 3), shared with `KafkaTopicConfig` so partitions and concurrency can't drift apart | Scale partitions to `target ÷ measured per-thread throughput`; partitions only ever grow |
+| Matching reads | **Done** — bounded nearest-first `GEOSEARCH` (caps 50/100/200 per radius) with one pipelined round-trip for candidate metadata | Push the filter into a Lua script if the round-trip still shows up |
 
 ---
 
