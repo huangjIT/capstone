@@ -55,6 +55,10 @@ app:
     # stop) before offering someone as a walking partner. Set false for demos that seed
     # users without streaming telemetry for them.
     require-fresh-presence: ${APP_MATCHING_REQUIRE_FRESH_PRESENCE:true}
+    # Re-seed users:meta:* from Postgres on startup. Accounts that predate the
+    # meta/presence split lost their active+preferences to the old shared 6h TTL and
+    # would otherwise never appear as match candidates again.
+    backfill-meta-on-startup: ${APP_MATCHING_BACKFILL_META:true}
   push:
     # Android/iOS delivery via Expo (which fronts FCM). Sending happens on the Kafka
     # consumer thread, never a request thread. A user with no registered device is a

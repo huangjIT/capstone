@@ -21,4 +21,8 @@ public interface UserRepository extends JpaRepository<User, Long> {
     List<User> findByEmailIgnoreCaseOrderByIdAsc(String email);
 
     List<User> findByRole(String role);
+
+    // Paged projection for the startup users:meta backfill — a Slice avoids the extra
+    // COUNT(*) a Page would issue on every page.
+    org.springframework.data.domain.Slice<User> findAllBy(org.springframework.data.domain.Pageable pageable);
 }
