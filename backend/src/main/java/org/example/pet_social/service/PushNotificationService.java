@@ -1,6 +1,7 @@
 package org.example.pet_social.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.example.pet_social.entity.DeviceToken;
@@ -49,6 +50,7 @@ public class PushNotificationService {
 
     private final DeviceTokenRepository deviceTokenRepository;
     private final NotificationRepository notificationRepository;
+    private final ObjectMapper objectMapper;
     private final RestClient restClient;
     private final boolean enabled;
     private final Counter sentCounter;
@@ -57,6 +59,7 @@ public class PushNotificationService {
 
     public PushNotificationService(DeviceTokenRepository deviceTokenRepository,
                                    NotificationRepository notificationRepository,
+                                   ObjectMapper objectMapper,
                                    MeterRegistry meterRegistry,
                                    @Value("${app.push.enabled:true}") boolean enabled,
                                    @Value("${app.push.expo-url:https://exp.host/--/api/v2/push/send}") String expoUrl,
@@ -65,6 +68,7 @@ public class PushNotificationService {
                                    @Value("${app.push.read-timeout-ms:10000}") int readTimeoutMs) {
         this.deviceTokenRepository = deviceTokenRepository;
         this.notificationRepository = notificationRepository;
+        this.objectMapper = objectMapper;
         this.enabled = enabled;
 
         // Explicit timeouts: this runs on the Kafka consumer thread, so an unresponsive
@@ -146,13 +150,18 @@ public class PushNotificationService {
         return message;
     }
 
-    private void dispatch(List<Map<String, Object>> chunk, List<DeviceToken> chunkTargets) {
-        JsonNode response = restClient.post()
+    private void dispatch(List<Map<String, Object>> chunk, List<DeviceToken> chunkTargets) throws Exception {
+        // Read the body as a String and parse with the app's ObjectMapper rather than
+        // asking RestClient to bind straight to JsonNode: the bare RestClient's default
+        // converters can't build a JsonNode deserializer here, and this mirrors how the
+        // Kafka producer/consumer already handle JSON in this codebase.
+        String raw = restClient.post()
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(chunk)
                 .retrieve()
-                .body(JsonNode.class);
+                .body(String.class);
 
+        JsonNode response = raw == null ? null : objectMapper.readTree(raw);
         if (response == null || !response.has("data")) {
             failedCounter.increment(chunk.size());
             return;
