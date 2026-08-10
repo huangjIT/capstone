@@ -20,12 +20,12 @@ O(1) round-trips per 1,000 records.
 |---|---------|----------|--------|
 | 1 | Matching: unbounded geo search + one Redis round-trip per candidate | Critical | **Fixed** |
 | 2 | Dashboard gauge loads the whole user table on every Prometheus scrape | Critical | **Fixed** |
-| 3 | App, Postgres, Kafka and Redis all on one EC2 instance | Critical | Open (infra) |
+| 3 | App, Postgres, Kafka and Redis all on one EC2 instance | Critical | **Fixed** (`deploy/`) |
 | 4 | Hikari pool (20) vs Tomcat threads (200) mismatch | High | **Fixed** |
 | 5 | Ingest ceiling is a plan, not a measurement | High | Partly fixed (now measurable) |
 | 6 | Unauthenticated endpoints; `KEYS` scan; spoofable telemetry | High | **Fixed** |
-| 7 | Schema managed by `ddl-auto: update` | Medium | Open |
-| 8 | Silent data-loss paths (no DLQ; TTL erases matching metadata) | Medium | Partly fixed (counters added) |
+| 7 | Schema managed by `ddl-auto: update` | Medium | **Fixed** (Flyway) |
+| 8 | Silent data-loss paths (no DLQ; TTL erases matching metadata) | Medium | **Fixed** (DLQ still open) |
 
 ### 1. Matching: unbounded geo search + N+1 Redis reads — FIXED
 
@@ -57,12 +57,21 @@ The observability system becomes the load.
 **Fix:** added `UserRepository.countByIsActiveTrue()` (a derived `COUNT(*)`) and used it in both
 the gauge and `getDashboardMetrics()`.
 
-### 3. Single-instance deployment — OPEN (infrastructure)
+### 3. Single-instance deployment — FIXED
 
-`docker-compose.aws.yml` co-locates app, Postgres, Kafka and Redis on one instance with a 2 GB
+`docker-compose.aws.yml` co-located app, Postgres, Kafka and Redis on one instance with a 2 GB
 app heap: Kafka replication factor 1, Redis unreplicated, one app instance, no load balancer,
 port 8080 exposed directly to the internet. Whatever the code can do, the ceiling is this box,
-and any container dying is a full outage. See section 3 for the target topology.
+and any container dying is a full outage.
+
+**Fix:** the 2-node + witness topology now exists as deployable compose files in `deploy/`
+(node A: app + Kafka + Redis replica; node B: app + Redis primary; witness: Sentinel only).
+Apps behind an ALB in a public subnet, everything else private, Postgres on RDS, secrets from
+SSM. The app talks to Redis **through Sentinel**, so a primary failover needs no redeploy.
+Node A owns Flyway migrations so two instances can't race for the migration lock at startup.
+See `deploy/README.md` for bring-up order, verification commands, a failover drill, and the
+security-group matrix. Remaining Phase 2 work is unchanged: single Kafka broker at RF 1, and
+one Redis primary for all writes.
 
 ### 4. Connection-pool arithmetic — FIXED
 
@@ -122,13 +131,25 @@ Redis caller while it runs.
 a cheap CPU-exhaustion vector. Best placed at the WAF/ALB layer of the target architecture, or
 Bucket4j in-app.
 
-### 7. `ddl-auto: update` — OPEN
+### 7. `ddl-auto: update` — FIXED
 
 Already failed silently once (see `THROUGHPUT_OPTIMIZATION_2026-06-16.md` §1): adding NOT NULL
 columns to a populated table left the schema stale while the app kept running. At 50k-row
-tables, boot-time DDL can also take long locks. Move to Flyway or Liquibase — explicit,
-reviewable, and it fails loudly. Deferred because it touches every environment's schema state
-and wants a planned rollout.
+tables, boot-time DDL can also take long locks.
+
+**Fix:** Flyway owns the schema (`src/main/resources/db/migration`), and Hibernate is set to
+`ddl-auto: validate` — it now refuses to start on entity/schema drift instead of silently
+mutating tables. `V1__baseline_schema.sql` was generated from the JPA metadata with Hibernate's
+schema exporter, so it matches the entities rather than someone's recollection of them.
+
+The split between V1 and V2 is the part worth understanding. Existing databases have tables but
+no `flyway_schema_history`, so `baseline-on-migrate` marks them as already at V1 and skips it —
+which means anything genuinely new can't live in V1 or those databases would never get it.
+Hence `V2__add_device_tokens.sql`. Fresh databases run V1 then V2 and land in the same place.
+
+Tests keep building their schema from the entities (H2), since the migrations are PostgreSQL DDL.
+That split is also what makes drift detectable: the app boots `validate` against a Flyway-built
+database, so a missing migration fails at startup rather than in production.
 
 ### 8. Silent data loss — partly fixed
 
@@ -140,17 +161,21 @@ Two paths:
   **Fixed:** added `telemetry.consume.parse.errors` and `telemetry.consume.batch.errors`, so a
   systematic failure can no longer masquerade as low traffic. A dead-letter topic is still
   worth adding.
-- **TTL erases matching metadata — OPEN.** The consumer refreshes a 6-hour `EXPIRE` on
-  `users:meta:{id}`, but that same hash holds the `active` and `preferences` fields written
-  once at registration. A user idle for more than 6 hours silently becomes unmatchable. Under a
-  multi-day soak test this presents as mysterious match-rate decay. The fix is to split durable
-  fields from volatile ones (or re-hydrate from Postgres on a miss); deferred because it
-  touches four services.
+- **TTL erases matching metadata — FIXED.** The consumer refreshed a 6-hour `EXPIRE` on
+  `users:meta:{id}`, but that same hash held the `active` and `preferences` fields written once
+  at registration, so a user idle for more than 6 hours silently became unmatchable. Under a
+  multi-day soak test this presents as mysterious match-rate decay.
+  **Fix:** the key is split by lifetime. `users:meta:*` keeps durable profile facts and carries
+  **no TTL**; `users:presence:*` holds `lastSeen`/`available`, is refreshed by every ping, and is
+  *meant* to expire — no ping means not out walking.
 
-**Related design gap, still open:** the consumer writes `available`/`lastSeen` on every ping,
-but matching filters on `active`/`preferences`, which are only written at registration. Matching
-therefore ignores telemetry freshness entirely — the two systems under load test are not
-actually connected. "Available" should mean "pinged recently."
+**Related design gap — FIXED.** Matching previously filtered on `active`/`preferences` only,
+both written at registration, so it ignored telemetry freshness entirely: the two systems being
+load-tested weren't actually connected. Matching now also requires a live `users:presence:*` key,
+fetched in the same pipelined round-trip as the metadata, so "available" means "pinged recently"
+rather than "ticked a box at signup". `PetQueryService`'s online indicator moved to the same
+signal for the same reason. Controlled by `app.matching.require-fresh-presence` (default true;
+set false for demos that seed users without streaming telemetry for them).
 
 ## 2. What is already sound
 
@@ -207,6 +232,36 @@ The proposal's 2-node + 1-witness topology, actually implemented:
 The interesting exception is Redis: the scaling work there is in the **data model**, not the
 service tier. See §1.5.
 
+## 3b. Android push notifications
+
+The in-app feed already worked end to end (`AppEventsProducer` → Kafka `app-events` →
+`AppEventsConsumer` → `notifications` row), but nothing ever reached the device — users only
+learned about a walk request by opening the app. Delivery now hangs off that same pipeline.
+
+- `device_tokens` stores Expo/FCM tokens. The **token**, not the user, is the identity:
+  registering a token that already exists reassigns its owner, because a shared phone moving
+  between accounts must not keep receiving the previous user's notifications. Dead tokens are
+  deactivated, not deleted.
+- `PushNotificationService` sends via Expo (which fronts FCM). Android specifics it gets right:
+  a **channelId per category** (mandatory since Android 8 — a channel the client hasn't created
+  is dropped silently by the OS); **`priority: high` only** for conversational/actionable
+  categories, since marking everything high is what gets an app throttled by FCM and flagged in
+  Android vitals; a **ttl** so a stale "someone messaged you" doesn't surface after doze; and a
+  **data payload** carrying `relatedType`/`relatedId` so a tap deep-links to the right screen.
+- Delivery runs on the Kafka consumer thread, never a request thread, and swallows its own
+  failures — a push outage must not fail the API call that triggered it. It is deliberately not
+  `@Transactional`: that would pin a Hikari connection for the whole push round-trip. The one
+  write (pruning tokens the service reports as `DeviceNotRegistered`) carries its own
+  transaction. Outbound timeouts are explicit so an unresponsive push service can't stall the
+  consumer.
+- Sends are batched to Expo's 100-message limit, and `push.notifications.{sent,failed}` plus
+  `push.notifications.tokens.pruned` make delivery health visible.
+
+**Client side, still to do:** register the Expo push token against
+`POST /api/notifications/device-token` on launch and on token rotation, `DELETE` it on logout,
+and create Android channels with ids `messages`, `requests` and `social` — ids that don't match
+mean the OS silently drops those notifications.
+
 ## 4. Files changed in this session
 
 - `service/MatchingService.java` — bounded nearest-first `GEOSEARCH`, growing per-radius caps,
@@ -225,7 +280,19 @@ service tier. See §1.5.
 - `demo.ps1` — captures and sends tokens (login fallback for pre-existing users)
 - `.gitignore` — ignore `logs/` and `.env`
 
-Verified: `mvnw compile` clean, `mvnw test` green (13 tests).
+Second pass (same day):
+- `entity/DeviceToken.java`, `repository/DeviceTokenRepository.java`,
+  `service/DeviceTokenService.java`, `service/PushNotificationService.java` — push delivery
+- `controller/NotificationController.java` — device-token register/unregister
+- `service/AppEventsConsumer.java` — push on every notification
+- `service/UserRegistryService.java`, `service/TelemetryConsumerService.java`,
+  `service/MatchingService.java`, `service/PetQueryService.java` — durable metadata split from
+  TTL'd presence; matching wired to presence freshness
+- `db/migration/V1__baseline_schema.sql`, `db/migration/V2__add_device_tokens.sql`, `pom.xml`,
+  `application.yml`, `src/test/resources/application.yml` — Flyway replaces `ddl-auto: update`
+- `deploy/` — 2-node + witness topology, `.env.example`, deployment README
+
+Verified: `mvnw test` green (13 tests); all three compose files pass `docker compose config`.
 
 ## 5. Next steps
 

@@ -8,8 +8,10 @@ import org.example.pet_social.dto.UiFormat;
 import org.example.pet_social.entity.Notification;
 import org.example.pet_social.entity.User;
 import org.example.pet_social.repository.NotificationRepository;
+import org.example.pet_social.service.DeviceTokenService;
 import org.example.pet_social.service.UserService;
 import org.example.pet_social.web.JwtAuthFilter;
+import jakarta.validation.constraints.NotBlank;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
@@ -23,10 +25,38 @@ public class NotificationController {
 
     private final NotificationRepository notificationRepository;
     private final UserService userService;
+    private final DeviceTokenService deviceTokenService;
 
-    public NotificationController(NotificationRepository notificationRepository, UserService userService) {
+    public NotificationController(NotificationRepository notificationRepository, UserService userService,
+                                  DeviceTokenService deviceTokenService) {
         this.notificationRepository = notificationRepository;
         this.userService = userService;
+        this.deviceTokenService = deviceTokenService;
+    }
+
+    /** Push-token registration. The client calls this on launch and on token rotation. */
+    public record DeviceTokenBody(
+            @NotBlank(message = "token is required") String token,
+            String platform // ANDROID (default) | IOS
+    ) {}
+
+    @PostMapping("/device-token")
+    public ResponseEntity<Map<String, String>> registerDevice(@Valid @RequestBody DeviceTokenBody body,
+                                                              HttpServletRequest request) {
+        User user = userService.getUserById(authUserId(request));
+        if (user == null) {
+            return ResponseEntity.badRequest().build();
+        }
+        deviceTokenService.register(user, body.token(), body.platform());
+        return ResponseEntity.ok(Map.of("status", "registered"));
+    }
+
+    /** Called on logout so the device stops receiving the previous account's pushes. */
+    @DeleteMapping("/device-token")
+    public ResponseEntity<Void> unregisterDevice(@Valid @RequestBody DeviceTokenBody body,
+                                                 HttpServletRequest request) {
+        deviceTokenService.unregister(authUserId(request), body.token());
+        return ResponseEntity.noContent().build();
     }
 
     /** NotificationsScreen feed, newest first. Scoped to the authenticated user. */

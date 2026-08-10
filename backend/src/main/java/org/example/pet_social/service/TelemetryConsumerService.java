@@ -47,7 +47,12 @@ public class TelemetryConsumerService {
     private final Set<String> consumerThreadsSeen = ConcurrentHashMap.newKeySet();
 
     private static final String GEO_KEY = "users:geo";
-    private static final String META_PREFIX = "users:meta:";
+    // Volatile presence, refreshed on every ping and allowed to expire. Kept separate from
+    // users:meta:* (durable active/preferences, no TTL) — they shared one hash until the
+    // per-ping EXPIRE started taking the matching fields with it, silently making any user
+    // idle for 6h unmatchable. Expiry here is the point: no ping means not out walking.
+    private static final String PRESENCE_PREFIX = "users:presence:";
+    static final Duration PRESENCE_TTL = Duration.ofHours(6);
 
     public TelemetryConsumerService(ObjectMapper objectMapper, StringRedisTemplate redisTemplate, DashboardService dashboardService, MeterRegistry meterRegistry) {
         this.objectMapper = objectMapper;
@@ -161,12 +166,12 @@ public class TelemetryConsumerService {
                         Point point = new Point(loc.longitude(), loc.latitude()); // Point(x=lon,y=lat)
                         connection.geoCommands().geoAdd(geoKey, point, bytes(member));
 
-                        byte[] metaKey = bytes(META_PREFIX + member);
-                        Map<byte[], byte[]> meta = new HashMap<>();
-                        meta.put(lastSeenField, now);
-                        meta.put(availableField, trueValue);
-                        connection.hashCommands().hMSet(metaKey, meta);
-                        connection.keyCommands().expire(metaKey, Duration.ofHours(6).toSeconds());
+                        byte[] presenceKey = bytes(PRESENCE_PREFIX + member);
+                        Map<byte[], byte[]> presence = new HashMap<>();
+                        presence.put(lastSeenField, now);
+                        presence.put(availableField, trueValue);
+                        connection.hashCommands().hMSet(presenceKey, presence);
+                        connection.keyCommands().expire(presenceKey, PRESENCE_TTL.toSeconds());
                     }
                     connection.stringCommands().incrBy(countKey, locations.size());
                     return null;

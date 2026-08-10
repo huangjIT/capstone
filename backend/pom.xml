@@ -64,6 +64,16 @@
             <artifactId>postgresql</artifactId>
             <scope>runtime</scope>
         </dependency>
+        <!-- Versioned schema migrations. Replaces ddl-auto: update, which silently failed
+             to add NOT NULL columns to populated tables (see THROUGHPUT_OPTIMIZATION_2026-06-16.md). -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
         <!-- In-memory DB so @SpringBootTest runs without Docker (see src/test/resources/application.yml) -->
         <dependency>
             <groupId>com.h2database</groupId>

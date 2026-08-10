@@ -31,7 +31,7 @@ import java.util.Locale;
 public class PetQueryService {
 
     private static final String GEO_KEY = "users:geo";
-    private static final String META_PREFIX = "users:meta:";
+    private static final String PRESENCE_PREFIX = "users:presence:";
 
     private final PetRepository petRepository;
     private final StringRedisTemplate redis;
@@ -143,12 +143,14 @@ public class PetQueryService {
         return UiFormat.haversineKm(latitude, longitude, p.getY(), p.getX());
     }
 
+    /** Online means "pinged recently" — the presence key expires when telemetry stops.
+     *  The profile's `active` flag is a durable setting and never expires, so it can't
+     *  answer this question. */
     private boolean isOwnerOnline(Long ownerId) {
         if (ownerId == null) {
             return false;
         }
-        Object active = redis.opsForHash().get(META_PREFIX + ownerId, "active");
-        return active != null && Boolean.parseBoolean(String.valueOf(active));
+        return Boolean.TRUE.equals(redis.hasKey(PRESENCE_PREFIX + ownerId));
     }
 
     private Long parseLong(String value) {

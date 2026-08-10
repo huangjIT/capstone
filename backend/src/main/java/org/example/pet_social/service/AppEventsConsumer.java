@@ -28,15 +28,18 @@ public class AppEventsConsumer {
     private final NotificationRepository notificationRepository;
     private final UserRepository userRepository;
     private final UnreadCountService unreadCountService;
+    private final PushNotificationService pushNotificationService;
 
     public AppEventsConsumer(ObjectMapper objectMapper,
                              NotificationRepository notificationRepository,
                              UserRepository userRepository,
-                             UnreadCountService unreadCountService) {
+                             UnreadCountService unreadCountService,
+                             PushNotificationService pushNotificationService) {
         this.objectMapper = objectMapper;
         this.notificationRepository = notificationRepository;
         this.userRepository = userRepository;
         this.unreadCountService = unreadCountService;
+        this.pushNotificationService = pushNotificationService;
     }
 
     @KafkaListener(topics = AppEventsProducer.TOPIC, groupId = "app-events-group", concurrency = "1")
@@ -69,6 +72,10 @@ public class AppEventsConsumer {
         if (AppEvent.MESSAGE_SENT.equals(event.type())) {
             unreadCountService.invalidate(event.recipientId());
         }
+
+        // Deliver to the device. Runs here rather than in the request handler so the push
+        // round-trip stays off the API's critical path; it swallows its own failures.
+        pushNotificationService.send(n);
     }
 
     private String categoryFor(String eventType) {

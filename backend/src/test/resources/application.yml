@@ -8,6 +8,12 @@ spring:
     username: sa
     password: ""
     driver-class-name: org.h2.Driver
+  # Flyway migrations are PostgreSQL DDL and are verified against Postgres, not H2.
+  # Tests build their schema from the entities instead, which is also what makes a
+  # drift between entities and migrations visible: the app boots with ddl-auto:validate
+  # against a Flyway-built database, so a missing migration fails at startup.
+  flyway:
+    enabled: false
   jpa:
     hibernate:
       ddl-auto: create-drop

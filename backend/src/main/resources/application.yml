@@ -50,6 +50,21 @@ app:
   # (APP_TEST_ENDPOINTS_ENABLED=false) in any internet-reachable deployment.
   test-endpoints:
     enabled: ${APP_TEST_ENDPOINTS_ENABLED:true}
+  matching:
+    # Require a live users:presence:* key (refreshed by telemetry, expires when pings
+    # stop) before offering someone as a walking partner. Set false for demos that seed
+    # users without streaming telemetry for them.
+    require-fresh-presence: ${APP_MATCHING_REQUIRE_FRESH_PRESENCE:true}
+  push:
+    # Android/iOS delivery via Expo (which fronts FCM). Sending happens on the Kafka
+    # consumer thread, never a request thread. A user with no registered device is a
+    # no-op, so this is safe to leave on in dev.
+    enabled: ${APP_PUSH_ENABLED:true}
+    expo-url: ${APP_PUSH_EXPO_URL:https://exp.host/--/api/v2/push/send}
+    # Only needed once the Expo project turns on enhanced push security.
+    access-token: ${APP_PUSH_ACCESS_TOKEN:}
+    connect-timeout-ms: ${APP_PUSH_CONNECT_TIMEOUT_MS:3000}
+    read-timeout-ms: ${APP_PUSH_READ_TIMEOUT_MS:10000}
 
 spring:
   application:
@@ -66,9 +81,22 @@ spring:
       maximum-pool-size: 20 # starting point; tune against the Sprint 4 load test
       minimum-idle: 5
 
+  # Schema is owned by Flyway (src/main/resources/db/migration), not Hibernate.
+  # ddl-auto: update silently failed to add NOT NULL columns to populated tables and
+  # left the app running against a stale schema for days; migrations fail loudly instead.
+  flyway:
+    enabled: ${FLYWAY_ENABLED:true}
+    # Databases created by the old ddl-auto have tables but no flyway_schema_history.
+    # Baselining at V1 marks the pre-Flyway schema as already present, so V1 is skipped
+    # there while V2 onward still apply. A fresh database runs everything from V1.
+    baseline-on-migrate: true
+    baseline-version: 1
+
   jpa:
     hibernate:
-      ddl-auto: update # Automatically updates DB schema based on your Java entities
+      # validate, never update: Hibernate checks the entities match what Flyway built
+      # and refuses to start on drift, rather than silently mutating the schema.
+      ddl-auto: ${JPA_DDL_AUTO:validate}
     # Console SQL logging is synchronous and measurably caps throughput under load.
     # Off by default; set SHOW_SQL=true when debugging queries locally.
     show-sql: ${SHOW_SQL:false}

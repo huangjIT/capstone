@@ -4,7 +4,6 @@ import org.example.pet_social.entity.User;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
-import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -14,6 +13,10 @@ public class UserRegistryService {
     private final UserService userService; // DB persistence (existing)
     private final StringRedisTemplate redisTemplate;
 
+    // Durable profile facts used by matching. Deliberately has NO TTL: this hash used to
+    // share a key with the per-ping presence fields, whose 6h refresh expired the whole
+    // hash — so a user idle for 6h silently became unmatchable until they re-registered.
+    // Volatile presence now lives under users:presence:* (see TelemetryConsumerService).
     private static final String META_PREFIX = "users:meta:";
 
     public UserRegistryService(UserService userService, StringRedisTemplate redisTemplate) {
@@ -32,10 +35,8 @@ public class UserRegistryService {
         Map<String, String> meta = new HashMap<>();
         meta.put("active", String.valueOf(saved.isActive()));
         meta.put("preferences", String.valueOf(preferencesMask));
-        meta.put("lastSeen", String.valueOf(System.currentTimeMillis()));
 
         redisTemplate.opsForHash().putAll(metaKey, meta);
-        redisTemplate.expire(metaKey, Duration.ofHours(6));
 
         return saved;
     }

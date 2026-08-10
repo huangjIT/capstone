@@ -21,6 +21,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 
 /**
  * Walking-partner matching engine.
@@ -38,6 +39,7 @@ public class MatchingService {
 
     private static final String GEO_KEY = "users:geo";
     private static final String META_PREFIX = "users:meta:";
+    private static final String PRESENCE_PREFIX = "users:presence:";
 
     // SLA expansion radii in meters.
     private final List<Double> radiiMeters = List.of(2000.0, 5000.0, 10000.0);
@@ -52,12 +54,15 @@ public class MatchingService {
     private final GeoOperations<String, String> geoOps;
     private final DashboardService dashboardService;
     private final Timer matchingTimer;
+    private final boolean requireFreshPresence;
 
     @Autowired
-    public MatchingService(StringRedisTemplate redis, DashboardService dashboardService, MeterRegistry meterRegistry) {
+    public MatchingService(StringRedisTemplate redis, DashboardService dashboardService, MeterRegistry meterRegistry,
+                           @Value("${app.matching.require-fresh-presence:true}") boolean requireFreshPresence) {
         this.redis = redis;
         this.geoOps = redis.opsForGeo();
         this.dashboardService = dashboardService;
+        this.requireFreshPresence = requireFreshPresence;
         this.matchingTimer = Timer.builder("matching.duration")
                 .description("Time to resolve a walking-partner match request")
                 .publishPercentiles(0.5, 0.95, 0.99)
@@ -89,19 +94,31 @@ public class MatchingService {
                 candidateIds.add(geoResult.getContent().getName());
             }
 
-            // One pipelined round-trip fetches every candidate's metadata hash; results
-            // come back in candidate (nearest-first) order.
-            List<Object> metas = redis.executePipelined((RedisCallback<Object>) connection -> {
+            // One pipelined round-trip fetches every candidate's durable metadata plus a
+            // presence probe; two replies per candidate, in candidate (nearest-first) order.
+            List<Object> replies = redis.executePipelined((RedisCallback<Object>) connection -> {
                 for (String id : candidateIds) {
                     connection.hashCommands().hGetAll((META_PREFIX + id).getBytes(StandardCharsets.UTF_8));
+                    connection.keyCommands().exists((PRESENCE_PREFIX + id).getBytes(StandardCharsets.UTF_8));
                 }
                 return null;
             });
 
             for (int i = 0; i < candidateIds.size(); i++) {
-                Object raw = i < metas.size() ? metas.get(i) : null;
+                int metaIdx = i * 2;
+                int presenceIdx = metaIdx + 1;
+                Object raw = metaIdx < replies.size() ? replies.get(metaIdx) : null;
                 if (!(raw instanceof Map<?, ?> meta) || meta.isEmpty()) {
                     continue;
+                }
+
+                // Presence expires when a user stops pinging, so "out walking right now" is
+                // a live signal rather than the profile flag matching used to rely on.
+                if (requireFreshPresence) {
+                    Object seen = presenceIdx < replies.size() ? replies.get(presenceIdx) : null;
+                    if (!Boolean.TRUE.equals(seen)) {
+                        continue;
+                    }
                 }
 
                 boolean active = Boolean.parseBoolean(String.valueOf(meta.get("active")));
