@@ -545,6 +545,15 @@ rationale.
    only block the exact ordered pair, not the swapped one — needs service-layer validation.
 7. **Enum-like fields are still plain `String`:** `role`, `status`, `species`, etc. have no
    `@Enumerated` or `@Pattern` validation.
+8. **Matching has no self-exclusion:** `POST /api/match` can return the requesting user as their
+   own walking partner. Harmless but conspicuous in a demo — use two accounts.
+9. **Prometheus/Grafana are empty by default.** `management.endpoints.web.exposure.include`
+   defaults to `health,info` and the Prometheus endpoint is disabled, so a scraper gets a 404
+   and dashboards stay blank. Set `MGMT_ENDPOINTS=health,info,prometheus` and
+   `MGMT_PROMETHEUS_ENABLED=true` in environments where you want metrics.
+10. **Query-parameter naming is inconsistent:** some endpoints take `lon`, others `lng`
+    (e.g. `GET /api/pets/nearby?lat&lon` vs the walk feed's `lat&lng`). Sending the wrong one
+    now returns a clear 400 rather than a 500, but the names should be unified.
 
 ### Matching Preferences Bitmask Reference (matching engine only)
 

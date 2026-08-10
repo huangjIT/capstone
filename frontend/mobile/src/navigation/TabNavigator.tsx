@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/colors';
 import { useWalkBadge } from '../context/WalkBadgeContext';
 import { useTelemetryPing } from '../utils/telemetry';
+import { usePushNotifications } from '../utils/push';
 import { HomeMapScreen } from '../screens/HomeMapScreen';
 import { FindPartnersScreen } from '../screens/FindPartnersScreen';
 import { PetBlindDateScreen } from '../screens/PetBlindDateScreen';
@@ -115,6 +116,9 @@ export const TabNavigator: React.FC = () => {
   const insets = useSafeAreaInsets();
   // Report the signed-in user's position into the backend geo index while the app is open.
   useTelemetryPing();
+  // Create the Android notification channels and register this device for push.
+  // Mounted here (behind auth) because registration needs a valid Bearer token.
+  usePushNotifications();
   // Sit above the Android system navigation bar (edge-to-edge on Android 15+)
   const tabBarStyle = {
     backgroundColor: COLORS.card,

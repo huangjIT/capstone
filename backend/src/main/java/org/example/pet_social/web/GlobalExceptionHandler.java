@@ -7,9 +7,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.time.Instant;
 import java.util.stream.Collectors;
@@ -54,6 +57,26 @@ public class GlobalExceptionHandler {
         HttpStatus status = HttpStatus.resolve(ex.getStatusCode().value());
         return respond(status == null ? HttpStatus.INTERNAL_SERVER_ERROR : status,
                 new Exception(ex.getReason() == null ? ex.getMessage() : ex.getReason()), request);
+    }
+
+    /**
+     * A missing or unparseable query parameter is the caller's mistake, not ours.
+     * Without these it lands in the catch-all as a 500, which tells the client
+     * nothing and files a server-error metric against a healthy server.
+     */
+    @ExceptionHandler({MissingServletRequestParameterException.class, MethodArgumentTypeMismatchException.class})
+    public ResponseEntity<ErrorResponse> handleBadParameter(Exception ex, HttpServletRequest request) {
+        return respond(HttpStatus.BAD_REQUEST, ex, request);
+    }
+
+    /**
+     * Unknown path → 404. Prometheus scraping a disabled /actuator/prometheus was
+     * generating a 500 and a full stack trace every 5 seconds, which buries real
+     * errors in the log and inflates the 5xx error metric.
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ErrorResponse> handleNotFound(NoResourceFoundException ex, HttpServletRequest request) {
+        return respond(HttpStatus.NOT_FOUND, ex, request);
     }
 
     @ExceptionHandler(Exception.class)

@@ -4,9 +4,12 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.mock;
@@ -46,5 +49,22 @@ class GlobalExceptionHandlerTest {
         ResponseEntity<ErrorResponse> res = handler.handleBadRequest(new IllegalArgumentException("bad input"), request);
         assertEquals(400, res.getStatusCode().value());
         assertEquals("bad input", res.getBody().message());
+    }
+
+    /** Caller sent ?lng= when the endpoint wants ?lon= — their mistake, not a server error. */
+    @Test
+    void missingRequestParameterMapsTo400() {
+        ResponseEntity<ErrorResponse> res = handler.handleBadParameter(
+                new MissingServletRequestParameterException("lon", "double"), request);
+        assertEquals(400, res.getStatusCode().value());
+    }
+
+    /** An unknown path must not report the server as broken; Prometheus polling a
+     *  disabled /actuator/prometheus was logging a 500 and a stack trace every 5s. */
+    @Test
+    void unknownPathMapsTo404() {
+        ResponseEntity<ErrorResponse> res = handler.handleNotFound(
+                new NoResourceFoundException(HttpMethod.GET, "/actuator/prometheus", "actuator/prometheus"), request);
+        assertEquals(404, res.getStatusCode().value());
     }
 }
