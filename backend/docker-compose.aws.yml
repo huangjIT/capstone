@@ -7,8 +7,8 @@ services:
     image: postgres:16-alpine
     container_name: pet-social-postgres
     environment:
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: rootpassword # change me (must match DB_PASSWORD below)
+      POSTGRES_USER: ${DB_USERNAME:?set DB_USERNAME in .env}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
       POSTGRES_DB: pet_social_db
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -48,13 +48,15 @@ services:
       - "8080:8080" # the ONLY port exposed to the internet
     environment:
       DB_URL: jdbc:postgresql://postgres:5432/pet_social_db
-      DB_USERNAME: admin
-      DB_PASSWORD: rootpassword # change me (must match POSTGRES_PASSWORD above)
+      DB_USERNAME: ${DB_USERNAME:?set DB_USERNAME in .env}
+      DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
       SPRING_DATA_REDIS_HOST: redis
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      # Generated for this deployment; rotate it if the repo ever becomes public.
-      APP_JWT_SECRET: "YPMBkub0XAInvKVqgSdPej+18T++Qwa1WsbzK8MykwUYRoSF6LHJs6dypHw3f+ac"
-      APP_CORS_ALLOWED_ORIGINS: "*"
+      # Never inline this. It signs every session token, so anyone who can read it can
+      # forge a token for any user. It lives in .env (gitignored) or SSM; the :? makes
+      # compose refuse to start rather than silently fall back to a shared default.
+      APP_JWT_SECRET: "${APP_JWT_SECRET:?set APP_JWT_SECRET in .env - generate one with 'openssl rand -base64 48'}"
+      APP_CORS_ALLOWED_ORIGINS: ${APP_CORS_ALLOWED_ORIGINS:-*}
       # This box is internet-reachable: keep the unauthenticated load-generation and
       # Redis-introspection endpoints off. Set to "true" temporarily to run a load test.
       APP_TEST_ENDPOINTS_ENABLED: "false"
