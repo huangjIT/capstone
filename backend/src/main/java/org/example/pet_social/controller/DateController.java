@@ -34,6 +34,7 @@ public class DateController {
         this.requestAuth = requestAuth;
     }
 
+    /** Same distance bound as the walk board — see WalkController.feed. */
     @GetMapping("/invitations/feed")
     public List<DateFeedItemResponse> feed(@RequestParam(required = false) Double lat,
                                            @RequestParam(required = false) Double lng,
@@ -41,8 +42,9 @@ public class DateController {
                                            @RequestParam(required = false) String age,
                                            @RequestParam(required = false) String vaccine,
                                            @RequestParam(required = false) String breed,
+                                           @RequestParam(required = false) Double radiusKm,
                                            HttpServletRequest request) {
-        return board.dateFeed(requestAuth.requireUserId(request), lat, lng, species, age, vaccine, breed);
+        return board.dateFeed(requestAuth.requireUserId(request), lat, lng, species, age, vaccine, breed, radiusKm);
     }
 
     @GetMapping("/invitations/my")

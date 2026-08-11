@@ -23,6 +23,7 @@ import org.example.pet_social.repository.PartnerRequestRepository;
 import org.example.pet_social.repository.PetRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -81,6 +82,8 @@ public class PartnerBoardService {
     private final AppEventsProducer appEventsProducer;
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
+    private final double defaultRadiusKm;
+    private final double maxRadiusKm;
 
     public PartnerBoardService(PartnerInvitationRepository invitationRepository,
                                PartnerRequestRepository requestRepository,
@@ -89,7 +92,9 @@ public class PartnerBoardService {
                                UserService userService,
                                AppEventsProducer appEventsProducer,
                                StringRedisTemplate redisTemplate,
-                               ObjectMapper objectMapper) {
+                               ObjectMapper objectMapper,
+                               @Value("${app.discovery.default-radius-km:25}") double defaultRadiusKm,
+                               @Value("${app.discovery.max-radius-km:100}") double maxRadiusKm) {
         this.invitationRepository = invitationRepository;
         this.requestRepository = requestRepository;
         this.petRepository = petRepository;
@@ -98,16 +103,22 @@ public class PartnerBoardService {
         this.appEventsProducer = appEventsProducer;
         this.redisTemplate = redisTemplate;
         this.objectMapper = objectMapper;
+        this.defaultRadiusKm = defaultRadiusKm;
+        this.maxRadiusKm = maxRadiusKm;
     }
 
     // ---------------------------------------------------------------- feed
 
     public List<WalkFeedItemResponse> walkFeed(Long userId, Double lat, Double lng) {
+        return walkFeed(userId, lat, lng, null);
+    }
+
+    public List<WalkFeedItemResponse> walkFeed(Long userId, Double lat, Double lng, Double radiusKm) {
         Map<Long, PartnerRequest> myRequests = myRequestsByInvitation(TYPE_WALK, userId);
         Map<Long, Long> unreadByRequest = countMap(
                 messageRepository.countUnreadGroupedByContextId(userId, contextTypeFor(TYPE_WALK)));
         List<WalkFeedItemResponse> out = new ArrayList<>();
-        for (FeedCard card : personalizableFeed(TYPE_WALK, userId)) {
+        for (FeedCard card : withinRadius(personalizableFeed(TYPE_WALK, userId), lat, lng, radiusKm)) {
             PartnerRequest mine = myRequests.get(card.id());
             Double distanceKm = distanceKm(lat, lng, card.latitude(), card.longitude());
             FeedPetInfo first = card.pets().isEmpty() ? null : card.pets().get(0);
@@ -136,11 +147,17 @@ public class PartnerBoardService {
 
     public List<DateFeedItemResponse> dateFeed(Long userId, Double lat, Double lng,
                                                String species, String age, String vaccine, String breed) {
+        return dateFeed(userId, lat, lng, species, age, vaccine, breed, null);
+    }
+
+    public List<DateFeedItemResponse> dateFeed(Long userId, Double lat, Double lng,
+                                               String species, String age, String vaccine, String breed,
+                                               Double radiusKm) {
         Map<Long, PartnerRequest> myRequests = myRequestsByInvitation(TYPE_DATE, userId);
         Map<Long, Long> unreadByRequest = countMap(
                 messageRepository.countUnreadGroupedByContextId(userId, contextTypeFor(TYPE_DATE)));
         List<DateFeedItemResponse> out = new ArrayList<>();
-        for (FeedCard card : personalizableFeed(TYPE_DATE, userId)) {
+        for (FeedCard card : withinRadius(personalizableFeed(TYPE_DATE, userId), lat, lng, radiusKm)) {
             FeedPetInfo pet = card.pets().isEmpty() ? null : card.pets().get(0);
             if (!matchesDateFilters(pet, species, age, vaccine, breed)) continue;
             PartnerRequest mine = myRequests.get(card.id());
@@ -170,6 +187,36 @@ public class PartnerBoardService {
     /** Cached caller-agnostic feed, minus the caller's own invitations. */
     private List<FeedCard> personalizableFeed(String type, Long userId) {
         return baseFeed(type).stream().filter(c -> c.hostId() != userId).toList();
+    }
+
+    /**
+     * Drops cards outside the search radius and orders what is left nearest-first.
+     *
+     * These feeds computed a distance for every card and used it only to render the "4.2 km
+     * away" label, so a walk on another continent sat in a list titled "Nearby Walking
+     * Partners" — sorted by invitation id, which put it above one across the street. The
+     * distance was always there; nothing acted on it.
+     *
+     * Cards with no coordinates are kept, at the end: an invitation whose host never set a
+     * location is unplaceable, not far away, and silently hiding it would lose posts that
+     * are otherwise valid. Without a caller position there is nothing to compare against,
+     * so the feed is returned untouched.
+     */
+    private List<FeedCard> withinRadius(List<FeedCard> cards, Double lat, Double lng, Double radiusKm) {
+        if (lat == null || lng == null) {
+            return cards;
+        }
+        double limitKm = radiusKm == null || radiusKm <= 0 ? defaultRadiusKm : Math.min(radiusKm, maxRadiusKm);
+        return cards.stream()
+                .filter(card -> {
+                    Double distanceKm = distanceKm(lat, lng, card.latitude(), card.longitude());
+                    return distanceKm == null || distanceKm <= limitKm;
+                })
+                .sorted(Comparator.comparingDouble(card -> {
+                    Double distanceKm = distanceKm(lat, lng, card.latitude(), card.longitude());
+                    return distanceKm == null ? Double.MAX_VALUE : distanceKm;
+                }))
+                .toList();
     }
 
     private List<FeedCard> baseFeed(String type) {

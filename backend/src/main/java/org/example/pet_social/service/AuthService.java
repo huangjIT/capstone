@@ -1,6 +1,7 @@
 package org.example.pet_social.service;
 
 import org.example.pet_social.entity.User;
+import org.example.pet_social.web.TooManyAttemptsException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -19,11 +20,13 @@ public class AuthService {
 
     private final UserService userService;
     private final UserRegistryService userRegistryService;
+    private final LoginRateLimiter rateLimiter;
     private final BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
 
-    public AuthService(UserService userService, UserRegistryService userRegistryService) {
+    public AuthService(UserService userService, UserRegistryService userRegistryService, LoginRateLimiter rateLimiter) {
         this.userService = userService;
         this.userRegistryService = userRegistryService;
+        this.rateLimiter = rateLimiter;
     }
 
     /** Returns the created user, or null if the email is already taken (any casing). */
@@ -59,22 +62,50 @@ public class AuthService {
         return userRegistryService.registerUser(user);
     }
 
-    /** Returns the user on valid credentials, else null. */
+    /**
+     * Returns the user on valid credentials, else null.
+     *
+     * Failed attempts are counted per account so a password spray spread across many source
+     * addresses still runs into a wall — LoginRateLimitFilter only sees one IP at a time.
+     * Exceeding the budget throws 429 rather than returning null, so the caller can tell
+     * "wrong password" apart from "stop trying"; a correct password clears the count.
+     */
     public User login(String email, String password) {
+        LoginRateLimiter.Decision decision = rateLimiter.checkAccount(email);
+        if (!decision.allowed()) {
+            throw new TooManyAttemptsException(
+                    "Too many failed sign-in attempts for this account. Try again in "
+                            + decision.retryAfterSeconds() + " seconds.",
+                    decision.retryAfterSeconds());
+        }
+
         User user = userService.getUserByEmail(email);
         if (user == null || user.getPasswordHash() == null) {
+            // Counted like any other failure: without this, probing for which addresses exist
+            // is free, and a spray against unregistered emails never trips the limit.
+            rateLimiter.recordFailedAttempt(email);
             return null;
         }
         String stored = user.getPasswordHash();
         if (stored.startsWith("$2a$") || stored.startsWith("$2b$") || stored.startsWith("$2y$")) {
-            return encoder.matches(password, stored) ? user : null;
+            return encoder.matches(password, stored) ? loginSucceeded(user) : loginFailed(email);
         }
         // Legacy unsalted SHA-256 hash: verify, then upgrade to BCrypt
         if (sha256Hex(password).equals(stored)) {
             user.setPasswordHash(encoder.encode(password));
             userService.registerUser(user); // save() — updates the existing row
-            return user;
+            return loginSucceeded(user);
         }
+        return loginFailed(email);
+    }
+
+    private User loginSucceeded(User user) {
+        rateLimiter.recordSuccessfulAttempt(user.getEmail());
+        return user;
+    }
+
+    private User loginFailed(String email) {
+        rateLimiter.recordFailedAttempt(email);
         return null;
     }
 

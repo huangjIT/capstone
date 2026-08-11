@@ -46,13 +46,19 @@ public class PetController {
         return petQueryService.findNearbyPets(lat, lon, radiusKm, limit);
     }
 
-    /** FindPartnersScreen: walking-partner cards. */
+    /**
+     * FindPartnersScreen: walking-partner cards.
+     * radiusKm is optional and clamped server-side (app.discovery.max-radius-km); omitting it
+     * uses the default radius rather than the entire index.
+     */
     @GetMapping("/partners")
     public List<WalkingPartnerResponse> partners(@RequestParam(required = false) Long userId,
                                                  @RequestParam(required = false) Double lat,
                                                  @RequestParam(required = false) Double lon,
-                                                 @RequestParam(required = false) String species) {
-        return petQueryService.findWalkingPartners(userId, lat, lon, species);
+                                                 @RequestParam(required = false) String species,
+                                                 @RequestParam(required = false) Double radiusKm,
+                                                 HttpServletRequest request) {
+        return petQueryService.findWalkingPartners(viewerId(userId, request), lat, lon, species, radiusKm);
     }
 
     /** PetBlindDateScreen: swipe deck. */
@@ -60,8 +66,20 @@ public class PetController {
     public List<BlindDatePetResponse> blindDates(@RequestParam(required = false) Long userId,
                                                  @RequestParam(required = false) Double lat,
                                                  @RequestParam(required = false) Double lon,
-                                                 @RequestParam(required = false) String species) {
-        return petQueryService.findBlindDatePets(userId, lat, lon, species);
+                                                 @RequestParam(required = false) String species,
+                                                 @RequestParam(required = false) Double radiusKm,
+                                                 HttpServletRequest request) {
+        return petQueryService.findBlindDatePets(viewerId(userId, request), lat, lon, species, radiusKm);
+    }
+
+    /**
+     * Who is looking — the id that gets excluded from their own feed. The token wins over the
+     * userId query parameter whenever one is present, so a caller cannot put someone else's id
+     * on the URL and be served a feed filtered for them. The parameter stays as the fallback
+     * for the legacy unauthenticated callers this endpoint still accepts.
+     */
+    private Long viewerId(Long userIdParam, HttpServletRequest request) {
+        return requestAuth.optionalUserId(request).orElse(userIdParam);
     }
 
     @GetMapping("/owner/{ownerId}")

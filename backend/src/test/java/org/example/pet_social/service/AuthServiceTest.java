@@ -3,28 +3,34 @@ package org.example.pet_social.service;
 import org.example.pet_social.entity.User;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.security.MessageDigest;
 import java.util.HexFormat;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 class AuthServiceTest {
 
     private UserService userService;
     private UserRegistryService userRegistryService;
+    private LoginRateLimiter rateLimiter;
     private AuthService authService;
 
     @BeforeEach
     void setUp() {
         userService = mock(UserService.class);
         userRegistryService = mock(UserRegistryService.class);
+        rateLimiter = mock(LoginRateLimiter.class);
+        when(rateLimiter.checkAccount(anyString())).thenReturn(LoginRateLimiter.Decision.ALLOWED);
         // registerUser echoes back the user it was given, like the real registry does
         when(userRegistryService.registerUser(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
-        authService = new AuthService(userService, userRegistryService);
+        authService = new AuthService(userService, userRegistryService, rateLimiter);
     }
 
     @Test
@@ -79,6 +85,43 @@ class AuthServiceTest {
         User googleOnly = new User("G", "google@example.com", "PET_OWNER", true);
         when(userService.getUserByEmail("google@example.com")).thenReturn(googleOnly);
         assertNull(authService.login("google@example.com", "anything"));
+    }
+
+    @Test
+    void loginCountsFailuresAndClearsThemOnSuccess() {
+        User user = new User("N", "rl@example.com", "PET_OWNER", true);
+        user.setPasswordHash(new BCryptPasswordEncoder().encode("right-pass"));
+        when(userService.getUserByEmail("rl@example.com")).thenReturn(user);
+
+        assertNull(authService.login("rl@example.com", "wrong-pass"));
+        verify(rateLimiter).recordFailedAttempt("rl@example.com");
+
+        assertSame(user, authService.login("rl@example.com", "right-pass"));
+        verify(rateLimiter).recordSuccessfulAttempt("rl@example.com");
+    }
+
+    @Test
+    void loginCountsAttemptsAgainstUnknownAccountsToo() {
+        when(userService.getUserByEmail("ghost@example.com")).thenReturn(null);
+
+        assertNull(authService.login("ghost@example.com", "x"));
+
+        // Otherwise probing for which emails are registered costs an attacker nothing
+        verify(rateLimiter).recordFailedAttempt("ghost@example.com");
+    }
+
+    @Test
+    void loginRejectsWithTooManyRequestsOnceTheAccountBudgetIsSpent() {
+        when(rateLimiter.checkAccount("locked@example.com"))
+                .thenReturn(new LoginRateLimiter.Decision(false, 42L));
+
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                () -> authService.login("locked@example.com", "any-pass"));
+
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS.value(), ex.getStatusCode().value());
+        assertTrue(ex.getReason().contains("42"), "the caller is told how long to wait");
+        // The throttle must short-circuit before the expensive part, or it defends nothing
+        verify(userService, never()).getUserByEmail(anyString());
     }
 
     @Test

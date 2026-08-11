@@ -35,11 +35,17 @@ public class WalkController {
         this.requestAuth = requestAuth;
     }
 
+    /**
+     * The board behind HomeMapScreen and FindPartnersScreen. When lat/lng are supplied the
+     * feed is bounded to radiusKm (default app.discovery.default-radius-km, clamped to
+     * max-radius-km) and ordered nearest-first; without them it cannot be, so it isn't.
+     */
     @GetMapping("/invitations/feed")
     public List<WalkFeedItemResponse> feed(@RequestParam(required = false) Double lat,
                                            @RequestParam(required = false) Double lng,
+                                           @RequestParam(required = false) Double radiusKm,
                                            HttpServletRequest request) {
-        return board.walkFeed(requestAuth.requireUserId(request), lat, lng);
+        return board.walkFeed(requestAuth.requireUserId(request), lat, lng, radiusKm);
     }
 
     @GetMapping("/invitations/my")

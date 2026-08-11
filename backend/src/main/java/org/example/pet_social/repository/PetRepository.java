@@ -21,6 +21,17 @@ public interface PetRepository extends JpaRepository<Pet, Long> {
            "WHERE p.isAvailableForPlaydate = true AND o.isActive = true AND o.id <> :excludeOwnerId")
     List<Pet> findPlaydateCandidates(@Param("excludeOwnerId") Long excludeOwnerId);
 
+    /**
+     * Same candidate pool, narrowed to owners Redis already placed inside the search radius.
+     * Discovery reads this rather than findPlaydateCandidates so the row count scales with
+     * the neighbourhood instead of the user table.
+     */
+    @Query("SELECT p FROM Pet p JOIN FETCH p.owner o " +
+           "WHERE p.isAvailableForPlaydate = true AND o.isActive = true " +
+           "AND o.id <> :excludeOwnerId AND o.id IN :ownerIds")
+    List<Pet> findPlaydateCandidatesForOwners(@Param("excludeOwnerId") Long excludeOwnerId,
+                                              @Param("ownerIds") List<Long> ownerIds);
+
     List<Pet> findBySpecies(String species);
 
     List<Pet> findByIsAvailableForPlaydate(Boolean isAvailable);

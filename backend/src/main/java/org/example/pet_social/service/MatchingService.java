@@ -69,11 +69,18 @@ public class MatchingService {
                 .register(meterRegistry);
     }
 
-    public Optional<Long> findNearestMatch(double latitude, double longitude, long requiredPreferencesMask) {
-        return matchingTimer.record(() -> findNearestMatchInternal(latitude, longitude, requiredPreferencesMask));
+    /**
+     * @param requesterUserId the authenticated caller, excluded from the results. A user is
+     *                        always the nearest member to their own position, so without this
+     *                        every request matched the caller with themselves. Null only for
+     *                        callers that have no identity (none today) and disables the skip.
+     */
+    public Optional<Long> findNearestMatch(Long requesterUserId, double latitude, double longitude, long requiredPreferencesMask) {
+        return matchingTimer.record(() -> findNearestMatchInternal(requesterUserId, latitude, longitude, requiredPreferencesMask));
     }
 
-    private Optional<Long> findNearestMatchInternal(double latitude, double longitude, long requiredPreferencesMask) {
+    private Optional<Long> findNearestMatchInternal(Long requesterUserId, double latitude, double longitude, long requiredPreferencesMask) {
+        String selfId = requesterUserId == null ? null : String.valueOf(requesterUserId);
         Point point = new Point(longitude, latitude);
 
         for (int step = 0; step < radiiMeters.size(); step++) {
@@ -91,7 +98,18 @@ public class MatchingService {
 
             List<String> candidateIds = new ArrayList<>(results.getContent().size());
             for (GeoResult<RedisGeoCommands.GeoLocation<String>> geoResult : results.getContent()) {
-                candidateIds.add(geoResult.getContent().getName());
+                String candidateId = geoResult.getContent().getName();
+                // Drop the caller here rather than after the metadata fetch: they are the
+                // nearest member to their own coordinates, so this is the one candidate
+                // guaranteed to be in every result set.
+                if (candidateId.equals(selfId)) {
+                    continue;
+                }
+                candidateIds.add(candidateId);
+            }
+
+            if (candidateIds.isEmpty()) {
+                continue;
             }
 
             // One pipelined round-trip fetches every candidate's durable metadata plus a

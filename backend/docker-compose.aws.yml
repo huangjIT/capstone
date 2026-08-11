@@ -67,13 +67,62 @@ services:
       # This box is internet-reachable: keep the unauthenticated load-generation and
       # Redis-introspection endpoints off. Set to "true" temporarily to run a load test.
       APP_TEST_ENDPOINTS_ENABLED: "false"
+      # Metrics for the Prometheus/Grafana pair below. Safe to expose here because
+      # /actuator/prometheus is only reachable on the compose network — port 8080 is
+      # published, but Prometheus scrapes app:8080 without going through it.
+      MGMT_ENDPOINTS: health,info,prometheus
+      MGMT_PROMETHEUS_ENABLED: "true"
+      # Connections arrive straight off the internet, so the socket address is the real
+      # client. Flip to "true" only if something that rewrites X-Forwarded-For is put in
+      # front (an ALB), or the login limiter becomes bypassable with a forged header.
+      APP_RATELIMIT_TRUST_FORWARDED_FOR: "false"
+      # POST /api/demo/seed. Leave false except while actually seeding — it writes accounts.
+      APP_DEMO_SEED_ENABLED: ${APP_DEMO_SEED_ENABLED:-false}
+      APP_DEMO_SEED_PASSWORD: ${APP_DEMO_SEED_PASSWORD:-pawpal-demo}
     depends_on:
       - postgres
       - redis
       - kafka
     restart: unless-stopped
 
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    container_name: pet-social-prometheus
+    volumes:
+      - ./monitoring/prometheus.aws.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    # Deliberately no published port: Grafana reaches it over the compose network, and
+    # Prometheus has no authentication of its own to put on a public interface.
+    restart: unless-stopped
+    depends_on:
+      - app
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: pet-social-grafana
+    ports:
+      # Restrict this to your own IP in the security group — it is a login page on the
+      # public internet, unlike the metrics it renders.
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      # No default: an admin password baked into a committed compose file is the same
+      # password on every deployment that ever copies it.
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env - generate one with 'openssl rand -base64 24'}"
+      # Nobody signs up for a demo dashboard; the admin account is the only account.
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
 volumes:
   postgres_data:
   kafka_data:
   redis_data:
+  prometheus_data:
+  grafana_data:

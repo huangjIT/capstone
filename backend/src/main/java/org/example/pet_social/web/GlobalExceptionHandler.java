@@ -4,6 +4,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -55,8 +56,10 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<ErrorResponse> handleResponseStatus(ResponseStatusException ex, HttpServletRequest request) {
         HttpStatus status = HttpStatus.resolve(ex.getStatusCode().value());
+        // Carry any headers the exception set — Retry-After on a 429 is part of the answer,
+        // not decoration, and a client that honours it is the one we want to keep.
         return respond(status == null ? HttpStatus.INTERNAL_SERVER_ERROR : status,
-                new Exception(ex.getReason() == null ? ex.getMessage() : ex.getReason()), request);
+                new Exception(ex.getReason() == null ? ex.getMessage() : ex.getReason()), request, ex.getHeaders());
     }
 
     /**
@@ -85,6 +88,11 @@ public class GlobalExceptionHandler {
     }
 
     private ResponseEntity<ErrorResponse> respond(HttpStatus status, Exception ex, HttpServletRequest request) {
+        return respond(status, ex, request, HttpHeaders.EMPTY);
+    }
+
+    private ResponseEntity<ErrorResponse> respond(HttpStatus status, Exception ex, HttpServletRequest request,
+                                                  HttpHeaders headers) {
         String correlationId = String.valueOf(request.getAttribute(RequestLoggingFilter.CORRELATION_ID_ATTRIBUTE));
 
         meterRegistry.counter("errors.count",
@@ -106,6 +114,6 @@ public class GlobalExceptionHandler {
                 request.getRequestURI(),
                 correlationId
         );
-        return ResponseEntity.status(status).body(body);
+        return ResponseEntity.status(status).headers(headers).body(body);
     }
 }

@@ -59,6 +59,42 @@ app:
     # meta/presence split lost their active+preferences to the old shared 6h TTL and
     # would otherwise never appear as match candidates again.
     backfill-meta-on-startup: ${APP_MATCHING_BACKFILL_META:true}
+  demo-seed:
+    # POST /api/demo/seed fills an empty deployment with owners, pets, posts, events,
+    # listings and live Redis presence (see DemoSeedService). Off unless asked for — it
+    # writes user accounts, so it defaults the opposite way to the load-test endpoints.
+    # Still requires a Bearer token: the controller sits under /api/ behind JwtAuthFilter.
+    enabled: ${APP_DEMO_SEED_ENABLED:false}
+    # Shared by every seeded account, so a presenter can sign in as any of them.
+    password: ${APP_DEMO_SEED_PASSWORD:pawpal-demo}
+  discovery:
+    # Radius bounds for /api/pets/{nearby,partners,blind-dates}. The partner and blind-date
+    # feeds previously had no bound at all: they read every playdate-available pet in the
+    # database and only used distance to render the label, so a "nearby walk" card could be
+    # thousands of km away. Radius is now a real filter, clamped server-side because the
+    # client supplies it.
+    default-radius-km: ${APP_DISCOVERY_DEFAULT_RADIUS_KM:25}
+    max-radius-km: ${APP_DISCOVERY_MAX_RADIUS_KM:100}
+    # Also the GEOSEARCH COUNT, so one request can't walk the whole geo index.
+    max-results: ${APP_DISCOVERY_MAX_RESULTS:100}
+  ratelimit:
+    # X-Forwarded-For is attacker-controlled unless a proxy overwrites it, so the limiter
+    # uses the socket address by default. Turn this on only behind an ALB/nginx that
+    # rewrites the header — otherwise a forged header buys an attacker a fresh budget.
+    trust-forwarded-for: ${APP_RATELIMIT_TRUST_FORWARDED_FOR:false}
+    login:
+      # Throttles /api/auth/{login,register,google} and the /api/users/* aliases. Each of
+      # those costs ~100ms of BCrypt or an outbound token verification, so unthrottled they
+      # let a few connections saturate every request thread on the box.
+      enabled: ${APP_RATELIMIT_LOGIN_ENABLED:true}
+      # Per source address, counting every attempt. Generous enough for a shared NAT/office
+      # egress IP and a demo audience signing in at once, tight enough to cap the CPU burn.
+      ip-attempts: ${APP_RATELIMIT_LOGIN_IP_ATTEMPTS:20}
+      ip-window-seconds: ${APP_RATELIMIT_LOGIN_IP_WINDOW_SECONDS:60}
+      # Per account, counting only failures and reset by a successful login. Kept to a short
+      # window on purpose: a long lockout would let anyone who knows your email lock you out.
+      account-failures: ${APP_RATELIMIT_LOGIN_ACCOUNT_FAILURES:10}
+      account-window-seconds: ${APP_RATELIMIT_LOGIN_ACCOUNT_WINDOW_SECONDS:900}
   push:
     # Android/iOS delivery via Expo (which fronts FCM). Sending happens on the Kafka
     # consumer thread, never a request thread. A user with no registered device is a
