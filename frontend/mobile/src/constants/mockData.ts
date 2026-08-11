@@ -203,6 +203,8 @@ export const walkingPartners: WalkingPartner[] = [
     tags: ['Calm', 'Vaccinated', 'Friendly'],
     rating: 4.8,
     type: 'Dog',
+    owner: 'Nate R.',
+    online: false,
   },
 ];
 

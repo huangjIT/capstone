@@ -1,13 +1,12 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
-import { getFocusedRouteNameFromRoute } from '@react-navigation/native';
+import { getFocusedRouteNameFromRoute, useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/colors';
-import { useWalkBadge } from '../context/WalkBadgeContext';
 import { useTelemetryPing } from '../utils/telemetry';
-import { usePushNotifications } from '../utils/push';
+import { usePushNotifications, type PushPayload } from '../utils/push';
 import { HomeMapScreen } from '../screens/HomeMapScreen';
 import { FindPartnersScreen } from '../screens/FindPartnersScreen';
 import { PetBlindDateScreen } from '../screens/PetBlindDateScreen';
@@ -61,15 +60,11 @@ interface TabIconProps {
   emoji: string;
   label: string;
   focused: boolean;
-  badge?: boolean;
 }
 
-const TabIcon: React.FC<TabIconProps> = ({ emoji, label, focused, badge }) => (
+const TabIcon: React.FC<TabIconProps> = ({ emoji, label, focused }) => (
   <View style={tabStyles.iconContainer}>
-    <View>
-      <Text style={tabStyles.emoji}>{emoji}</Text>
-      {badge && <View style={tabStyles.badgeDot} />}
-    </View>
+    <Text style={tabStyles.emoji}>{emoji}</Text>
     <Text style={[tabStyles.label, focused ? tabStyles.labelActive : tabStyles.labelInactive]}>
       {label}
     </Text>
@@ -82,17 +77,6 @@ const tabStyles = StyleSheet.create({
     justifyContent: 'center',
     paddingTop: 4,
     width: 60,
-  },
-  badgeDot: {
-    position: 'absolute',
-    top: 2,
-    right: -4,
-    width: 9,
-    height: 9,
-    borderRadius: 4.5,
-    backgroundColor: '#EF4444',
-    borderWidth: 1.5,
-    borderColor: COLORS.card,
   },
   emoji: {
     fontSize: 22,
@@ -112,13 +96,24 @@ const tabStyles = StyleSheet.create({
 });
 
 export const TabNavigator: React.FC = () => {
-  const { pendingCount, unreadMsgCount } = useWalkBadge();
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation<any>();
   // Report the signed-in user's position into the backend geo index while the app is open.
   useTelemetryPing();
   // Create the Android notification channels and register this device for push.
   // Mounted here (behind auth) because registration needs a valid Bearer token.
-  usePushNotifications();
+  //
+  // Tapping a push lands on the list the notification belongs to. The push carries
+  // relatedId, but it identifies a match/event/pet — not the walk or date *request* the
+  // detail screen is built around — so routing to the filtered list is the honest
+  // destination: the item is the first thing on it, and the alternative was doing nothing.
+  usePushNotifications(useCallback((payload: PushPayload) => {
+    const filter =
+      payload.category === 'WALK_REQUEST' ? 'walk'
+      : payload.category === 'BLIND_DATE' ? 'date'
+      : undefined;
+    navigation.navigate('Notifications', filter ? { filter } : undefined);
+  }, [navigation]));
   // Sit above the Android system navigation bar (edge-to-edge on Android 15+)
   const tabBarStyle = {
     backgroundColor: COLORS.card,
@@ -151,8 +146,11 @@ export const TabNavigator: React.FC = () => {
           const routeName = getFocusedRouteNameFromRoute(route) ?? 'FindPartners';
           const hideTabBar = ['ConnectPetProfile', 'PostInvitation', 'EditInvitation', 'CompletedWalks'].includes(routeName);
           return {
+            // No badge: unread state is shown once, by the bell on the Home map. This dot
+            // was also only ever populated while the Walk tab itself was open, so it went
+            // stale the moment you were anywhere else.
             tabBarIcon: ({ focused }) => (
-              <TabIcon emoji="🚶" label="Walk" focused={focused} badge={pendingCount > 0 || unreadMsgCount > 0} />
+              <TabIcon emoji="🚶" label="Walk" focused={focused} />
             ),
             tabBarStyle: hideTabBar ? { display: 'none' as const } : tabBarStyle,
           };

@@ -10,8 +10,10 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
+// MapView is a default export, not a named one — importing it as a named type failed to
+// resolve, which left the ref untyped and every camera callback an implicit any.
 import MapView, { Marker, PROVIDER_GOOGLE, PROVIDER_DEFAULT } from 'react-native-maps';
-import type { MapView as MapViewType } from 'react-native-maps';
+import type { Camera } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -78,7 +80,11 @@ export const HomeMapScreen: React.FC<{ navigation?: any }> = ({ navigation }) =>
   const [selectedItem, setSelectedItem] = useState<MapFeedItem | null>(null);
   const [sentIds, setSentIds] = useState<Set<string>>(new Set());
   const [connecting, setConnecting] = useState(false);
-  const mapRef = useRef<MapViewType>(null);
+  // The app's single notification badge. It used to be spread across the Walk, Date and Me
+  // headers plus a dot on the Walk tab, each counting something slightly different from its
+  // own state, so they regularly disagreed. One bell, one count, read from the server.
+  const [unreadNotifs, setUnreadNotifs] = useState(0);
+  const mapRef = useRef<MapView>(null);
 
   const handleLocateMe = async () => {
     const { status } = await Location.requestForegroundPermissionsAsync();
@@ -109,7 +115,19 @@ export const HomeMapScreen: React.FC<{ navigation?: any }> = ({ navigation }) =>
     } catch (_) {}
   }, []);
 
-  useFocusEffect(useCallback(() => { loadFeed(); }, [loadFeed]));
+  const loadUnreadNotifs = useCallback(async () => {
+    try {
+      const { count } = await apiGet<{ count: number }>('/api/notifications/unread-count');
+      setUnreadNotifs(count ?? 0);
+    } catch (_) {}
+  }, []);
+
+  // Refreshed every time Home regains focus, which includes coming back from the
+  // notifications list — so reading them clears the badge without a manual refresh.
+  useFocusEffect(useCallback(() => {
+    loadFeed();
+    loadUnreadNotifs();
+  }, [loadFeed, loadUnreadNotifs]));
 
   useEffect(() => {
     (async () => {
@@ -118,8 +136,13 @@ export const HomeMapScreen: React.FC<{ navigation?: any }> = ({ navigation }) =>
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       const coords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
       mapRef.current?.animateCamera({ center: coords, zoom: 15 }, { duration: 800 });
+      // The first loadFeed() fires on focus, which races this permission prompt and usually
+      // wins — so on a fresh install the feed was fetched with no coordinates and the sheet
+      // read "0 pets nearby" until you switched tabs and came back. Now that a position
+      // exists, ask again.
+      await loadFeed();
     })();
-  }, []);
+  }, [loadFeed]);
 
   const markers = feed.filter(item => item.latitude != null && item.longitude != null);
 
@@ -180,6 +203,27 @@ export const HomeMapScreen: React.FC<{ navigation?: any }> = ({ navigation }) =>
           <Text style={styles.logoPaw}>🐾</Text>
           <Text style={styles.logoText}>PawPal</Text>
         </View>
+
+        {/* The one place notifications live. Every other screen used to carry its own
+            entry point to this same list. */}
+        <TouchableOpacity
+          style={styles.notifBtn}
+          onPress={() => navigation?.navigate('Notifications')}
+          activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityLabel={
+            unreadNotifs > 0 ? `Notifications, ${unreadNotifs} unread` : 'Notifications'
+          }
+        >
+          <Text style={styles.notifBtnIcon}>🔔</Text>
+          {unreadNotifs > 0 && (
+            <View style={styles.notifBadge}>
+              <Text style={styles.notifBadgeText}>
+                {unreadNotifs > 99 ? '99+' : unreadNotifs}
+              </Text>
+            </View>
+          )}
+        </TouchableOpacity>
       </View>
 
       {/* Locate Me Button */}
@@ -191,7 +235,7 @@ export const HomeMapScreen: React.FC<{ navigation?: any }> = ({ navigation }) =>
       <View style={styles.zoomControls}>
         <TouchableOpacity
           style={styles.zoomBtn}
-          onPress={() => mapRef.current?.getCamera().then(cam => {
+          onPress={() => mapRef.current?.getCamera().then((cam: Camera) => {
             mapRef.current?.animateCamera({ zoom: (cam.zoom ?? 14) + 1 }, { duration: 200 });
           })}
         >
@@ -200,7 +244,7 @@ export const HomeMapScreen: React.FC<{ navigation?: any }> = ({ navigation }) =>
         <View style={styles.zoomDivider} />
         <TouchableOpacity
           style={styles.zoomBtn}
-          onPress={() => mapRef.current?.getCamera().then(cam => {
+          onPress={() => mapRef.current?.getCamera().then((cam: Camera) => {
             mapRef.current?.animateCamera({ zoom: (cam.zoom ?? 14) - 1 }, { duration: 200 });
           })}
         >
@@ -439,6 +483,41 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800',
     color: COLORS.primary,
+  },
+  notifBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  notifBtnIcon: {
+    fontSize: 20,
+  },
+  notifBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 2,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    backgroundColor: '#EF4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+  },
+  notifBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#FFFFFF',
   },
   bottomSheet: {
     position: 'absolute',

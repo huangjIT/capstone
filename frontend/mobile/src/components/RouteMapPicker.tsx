@@ -11,7 +11,7 @@ import {
   Pressable,
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE, PROVIDER_DEFAULT } from 'react-native-maps';
-import type { MapView as MapViewType } from 'react-native-maps';
+import type { Camera } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/colors';
@@ -79,7 +79,7 @@ export const RouteMapPicker: React.FC<RouteMapPickerProps> = ({ visible, onClose
   const [routeCoords, setRouteCoords] = useState<LatLng[]>([]);
   const [routeInfo, setRouteInfo] = useState<{ duration: string; distance: string } | null>(null);
   const [startSheetVisible, setStartSheetVisible] = useState(false);
-  const mapRef = useRef<MapViewType>(null);
+  const mapRef = useRef<MapView>(null);
 
   const handleMapPress = async (e: any) => {
     const coord: LatLng = e.nativeEvent.coordinate;
@@ -278,7 +278,7 @@ export const RouteMapPicker: React.FC<RouteMapPickerProps> = ({ visible, onClose
         <View style={styles.zoomControls}>
           <TouchableOpacity
             style={styles.zoomBtn}
-            onPress={() => mapRef.current?.getCamera().then(cam => {
+            onPress={() => mapRef.current?.getCamera().then((cam: Camera) => {
               mapRef.current?.animateCamera({ zoom: (cam.zoom ?? 14) + 1 }, { duration: 200 });
             })}
           >
@@ -287,7 +287,7 @@ export const RouteMapPicker: React.FC<RouteMapPickerProps> = ({ visible, onClose
           <View style={styles.zoomDivider} />
           <TouchableOpacity
             style={styles.zoomBtn}
-            onPress={() => mapRef.current?.getCamera().then(cam => {
+            onPress={() => mapRef.current?.getCamera().then((cam: Camera) => {
               mapRef.current?.animateCamera({ zoom: (cam.zoom ?? 14) - 1 }, { duration: 200 });
             })}
           >
@@ -463,7 +463,7 @@ const styles = StyleSheet.create({
   },
 
   loadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(255,255,255,0.5)',
@@ -532,7 +532,7 @@ const styles = StyleSheet.create({
   confirmText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 
   sheetOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.4)',
     justifyContent: 'flex-end',
   },

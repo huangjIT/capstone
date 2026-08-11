@@ -49,10 +49,15 @@ export async function apiPut<T>(path: string, body: object): Promise<T> {
   return parseBody<T>(text);
 }
 
-export async function apiDelete<T>(path: string): Promise<T> {
+/**
+ * DELETE, optionally with a body — DELETE /api/notifications/device-token takes a
+ * @RequestBody naming which token to retire, and rejects the request without one.
+ */
+export async function apiDelete<T>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
     method: 'DELETE',
     headers: await authHeaders(),
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await res.text();
   if (!res.ok) throw new Error(text || 'Request failed');

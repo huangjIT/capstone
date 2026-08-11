@@ -18,7 +18,6 @@ import { COLORS } from '../constants/colors';
 import { FilterRow } from '../components/FilterRow';
 import { PetCard } from '../components/PetCard';
 import { apiGet } from '../utils/api';
-import { useWalkBadge } from '../context/WalkBadgeContext';
 
 export interface WalkInvitation {
   id: string;
@@ -79,13 +78,11 @@ interface FindPartnersScreenProps {
 
 export const FindPartnersScreen: React.FC<FindPartnersScreenProps> = ({ navigation }) => {
   const insets = useSafeAreaInsets();
-  const { setPendingCount, setUnreadMsgCount } = useWalkBadge();
   const [typeFilter, setTypeFilter] = useState('All');
   const [myInvitations, setMyInvitations] = useState<WalkInvitation[]>([]);
   const [feed, setFeed] = useState<WalkFeedItem[]>([]);
   const [sentRequestIds, setSentRequestIds] = useState<Set<string>>(new Set());
   const [unreadCountMap, setUnreadCountMap] = useState<Record<string, number>>({});
-  const [unreadMsg, setUnreadMsg] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const isFocused = useRef(false);
@@ -139,10 +136,6 @@ export const FindPartnersScreen: React.FC<FindPartnersScreenProps> = ({ navigati
       setMyInvitations(invs);
       setFeed(feedItems);
       setSentRequestIds(new Set(sentReqs.map(r => r.invitationId)));
-      const total = invs.reduce((sum, inv) => sum + (inv.pendingRequestCount ?? 0), 0);
-      setPendingCount(total);
-      const totalUnread = feedItems.reduce((sum, item) => sum + (item.unreadMessageCount ?? 0), 0);
-      setUnreadMsgCount(totalUnread);
     } catch (_) {
     } finally {
       setLoading(false);
@@ -150,18 +143,17 @@ export const FindPartnersScreen: React.FC<FindPartnersScreenProps> = ({ navigati
     }
   }, []);
 
+  // Polled every 5s while this tab is focused, so it fetches only what this screen still
+  // renders: the per-conversation unread counts on the partner cards. The companion
+  // /api/messages/unread-counts call went with the header's message button.
   const refreshUnread = useCallback(async () => {
     try {
-      const [data, counts] = await Promise.all([
-        apiGet<Array<{ invitationId: string; unreadCount: number }>>('/api/walk/requests/my-sent-unread'),
-        apiGet<Record<string, number>>('/api/messages/unread-counts'),
-      ]);
+      const data = await apiGet<Array<{ invitationId: string; unreadCount: number }>>(
+        '/api/walk/requests/my-sent-unread'
+      );
       const map: Record<string, number> = {};
-      let total = 0;
-      data.forEach(item => { map[item.invitationId] = item.unreadCount; total += item.unreadCount; });
+      data.forEach(item => { map[item.invitationId] = item.unreadCount; });
       setUnreadCountMap(map);
-      setUnreadMsgCount(total);
-      setUnreadMsg(counts.WALK ?? 0);
     } catch (_) {}
   }, []);
 
@@ -205,16 +197,12 @@ export const FindPartnersScreen: React.FC<FindPartnersScreenProps> = ({ navigati
     <View style={styles.container}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+        {/* No notification button here on purpose — the bell on the Home map is the single
+            entry point to the notifications list. The per-invitation request counts below
+            stay, because those are facts about a specific invitation you posted, not a
+            second copy of the inbox. */}
         <View style={styles.headerRow}>
           <Text style={styles.headerTitle}>🚶 Find Walk Partners</Text>
-          <TouchableOpacity
-            style={styles.msgBtn}
-            onPress={() => navigation.navigate('Notifications' as any, { filter: 'walk' } as any)}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.msgBtnText}>💬</Text>
-            {unreadMsg > 0 && <View style={styles.msgBtnDot} />}
-          </TouchableOpacity>
         </View>
       </View>
 
@@ -355,28 +343,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-  },
-  msgBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: COLORS.bg,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  msgBtnText: { fontSize: 18 },
-  msgBtnDot: {
-    position: 'absolute',
-    top: 2,
-    right: 2,
-    width: 11,
-    height: 11,
-    borderRadius: 5.5,
-    backgroundColor: '#EF4444',
-    borderWidth: 1.5,
-    borderColor: COLORS.card,
   },
   invSection: { backgroundColor: COLORS.card },
   sectionHeader: {

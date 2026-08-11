@@ -1,7 +1,19 @@
 import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { apiPost, apiDelete, getToken } from './api';
+
+/** Where the Expo token is kept so logout can retire it without holding a React ref. */
+const PUSH_TOKEN_KEY = 'push_token';
+
+/** The `data` block PushNotificationService attaches to every message. */
+export interface PushPayload {
+  notificationId?: string;
+  category?: string;
+  relatedType?: string;
+  relatedId?: number;
+}
 
 /**
  * expo-notifications and expo-device are native modules. A JS bundle can be newer
@@ -120,6 +132,8 @@ export async function registerForPush(): Promise<string | null> {
     // Only register once we actually hold an auth token, or the call 401s.
     if (await getToken()) {
       await apiPost('/api/notifications/device-token', { token, platform: 'ANDROID' });
+      // Persisted so sign-out can name the token to retire from any screen.
+      await AsyncStorage.setItem(PUSH_TOKEN_KEY, token);
       console.log('[push] registered token with backend');
     }
     return token;
@@ -130,38 +144,71 @@ export async function registerForPush(): Promise<string | null> {
   }
 }
 
-/** Call on logout so this device stops receiving the previous account's pushes. */
-export async function unregisterPush(token: string | null) {
-  if (!token) return;
+/**
+ * Call on logout, before the auth token is cleared — the DELETE is authenticated, so
+ * clearing first turns this into a 401 and leaves the device subscribed to the previous
+ * account's notifications.
+ *
+ * The token is read from storage rather than passed in, so any screen can call this, and
+ * the request carries it in the body because that is what the endpoint validates on.
+ */
+export async function unregisterPush(): Promise<void> {
   try {
-    await apiDelete('/api/notifications/device-token');
-  } catch {
-    // best-effort
+    const token = await AsyncStorage.getItem(PUSH_TOKEN_KEY);
+    if (token) {
+      await apiDelete('/api/notifications/device-token', { token, platform: 'ANDROID' });
+    }
+  } catch (e) {
+    // Best-effort: a failure here must not block someone from signing out.
+    console.log('[push] unregister failed:', e);
+  } finally {
+    await AsyncStorage.removeItem(PUSH_TOKEN_KEY);
   }
 }
 
 /**
  * Registers for push and routes taps. Mount once behind auth (TabNavigator),
  * alongside useTelemetryPing.
+ *
+ * The handler receives the whole data block rather than just relatedType/relatedId,
+ * because category is what distinguishes a walk request from a blind-date one and both
+ * carry the same relatedType. It is held in a ref so a caller passing an inline arrow
+ * function doesn't tear down and re-subscribe the listener on every render.
  */
-export function usePushNotifications(onDeepLink?: (relatedType: string, relatedId: number) => void) {
+export function usePushNotifications(onDeepLink?: (payload: PushPayload) => void) {
   const tokenRef = useRef<string | null>(null);
+  const handlerRef = useRef(onDeepLink);
+  handlerRef.current = onDeepLink;
 
   useEffect(() => {
     registerForPush().then((t) => (tokenRef.current = t));
     if (!Notifications) return;
 
-    // Tapping a notification should land on the thing it is about, not the home tab.
-    const sub = Notifications.addNotificationResponseReceivedListener((response: any) => {
-      const data = response.notification.request.content.data as
-        | { relatedType?: string; relatedId?: number }
-        | undefined;
-      if (data?.relatedType && data.relatedId != null && onDeepLink) {
-        onDeepLink(String(data.relatedType), Number(data.relatedId));
+    const handle = (response: any) => {
+      const payload = response?.notification?.request?.content?.data as PushPayload | undefined;
+      if (payload && handlerRef.current) {
+        handlerRef.current(payload);
       }
-    });
-    return () => sub.remove();
-  }, [onDeepLink]);
+    };
+
+    // Tapping a notification should land on the thing it is about, not the home tab.
+    const sub = Notifications.addNotificationResponseReceivedListener(handle);
+
+    // A tap that launched the app from cold has already been delivered by the time this
+    // listener attaches, so it arrives here instead — without this, deep links work only
+    // when the app was already running.
+    let cancelled = false;
+    Notifications.getLastNotificationResponseAsync?.()
+      .then((response: any) => {
+        if (!cancelled && response) handle(response);
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+      sub.remove();
+    };
+  }, []);
 
   return tokenRef;
 }

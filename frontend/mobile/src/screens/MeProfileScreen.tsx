@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { COLORS } from '../constants/colors';
 import { clearToken, apiGet } from '../utils/api';
+import { unregisterPush } from '../utils/push';
 
 interface UserProfile {
   id: string;
@@ -121,15 +122,9 @@ export const MeProfileScreen: React.FC<MeProfileScreenProps> = ({ navigation }) 
       showsVerticalScrollIndicator={false}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
     >
-      {/* Header */}
+      {/* Header — the bell that used to sit here now lives once, on the Home map */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <Text style={styles.headerTitle}>My Profile</Text>
-        <TouchableOpacity
-            style={styles.iconBtn}
-            onPress={() => navigation.navigate('Notifications')}
-          >
-            <Text style={styles.iconBtnText}>🔔</Text>
-          </TouchableOpacity>
       </View>
 
       {/* Profile Card */}
@@ -229,6 +224,10 @@ export const MeProfileScreen: React.FC<MeProfileScreenProps> = ({ navigation }) 
       <TouchableOpacity
         style={styles.signOutBtn}
         onPress={async () => {
+          // Retire the push token BEFORE clearing the auth token: the unregister call is
+          // authenticated, so the other order 401s and leaves this handset receiving the
+          // previous account's notifications.
+          await unregisterPush();
           await clearToken();
           try { await GoogleSignin.signOut(); } catch (_) {}
           navigation.reset({ index: 0, routes: [{ name: 'Login' }] });

@@ -91,7 +91,6 @@ export const PetBlindDateScreen: React.FC<PetBlindDateScreenProps> = ({ navigati
   const [myInvitations, setMyInvitations] = useState<DateInvitation[]>([]);
   const [feed, setFeed] = useState<DateFeedItem[]>([]);
   const [heartedIds, setHeartedIds] = useState<Set<string>>(new Set());
-  const [unreadMsg, setUnreadMsg] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -161,19 +160,9 @@ export const PetBlindDateScreen: React.FC<PetBlindDateScreenProps> = ({ navigati
     }
   }, [buildFeedPath]);
 
-  const refreshUnread = useCallback(async () => {
-    try {
-      const counts = await apiGet<Record<string, number>>('/api/messages/unread-counts');
-      setUnreadMsg(counts.DATE ?? 0);
-    } catch (_) {}
-  }, []);
-
-  useFocusEffect(useCallback(() => {
-    loadData();
-    refreshUnread();
-    const interval = setInterval(refreshUnread, 5000);
-    return () => clearInterval(interval);
-  }, [loadData, refreshUnread]));
+  // The 5s /api/messages/unread-counts poll that used to run here existed only to light a
+  // dot on the header's message button. That button now lives once, on the Home map.
+  useFocusEffect(useCallback(() => { loadData(); }, [loadData]));
 
   const onRefresh = useCallback(() => { setRefreshing(true); loadData(); }, [loadData]);
 
@@ -191,19 +180,13 @@ export const PetBlindDateScreen: React.FC<PetBlindDateScreenProps> = ({ navigati
     <View style={styles.container}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+        {/* Notifications live once, on the Home map. The per-invitation request counts
+            further down stay — those describe a specific date you posted. */}
         <View style={styles.headerRow}>
           <View>
             <Text style={styles.headerTitle}>💕 Pet Blind Date</Text>
             <Text style={styles.headerSub}>Find the perfect match for your pet</Text>
           </View>
-          <TouchableOpacity
-            style={styles.msgBtn}
-            onPress={() => navigation.navigate('Notifications' as any, { filter: 'date' } as any)}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.msgBtnText}>💬</Text>
-            {unreadMsg > 0 && <View style={styles.msgBtnDot} />}
-          </TouchableOpacity>
         </View>
       </View>
 
@@ -347,28 +330,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-  },
-  msgBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: COLORS.bg,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  msgBtnText: { fontSize: 18 },
-  msgBtnDot: {
-    position: 'absolute',
-    top: 2,
-    right: 2,
-    width: 11,
-    height: 11,
-    borderRadius: 5.5,
-    backgroundColor: '#EF4444',
-    borderWidth: 1.5,
-    borderColor: COLORS.card,
   },
   myDatesSection: { backgroundColor: COLORS.card },
   myDatesHeader: {
