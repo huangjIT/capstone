@@ -106,6 +106,16 @@ The token is a JWT valid for 7 days. Send it as `Authorization: Bearer <token>`.
 
 ## 2. Pets & discovery — `/api/pets`
 
+> **Discovery is bounded by distance (2026-08-11).** Every endpoint in this section, plus
+> `/api/{walk,date}/invitations/feed`, accepts an optional **`radiusKm`** and returns only
+> results inside it, sorted nearest-first. Omitted → `app.discovery.default-radius-km` (25 km).
+> Supplied → clamped to `app.discovery.max-radius-km` (100 km), because the value comes from the
+> client. Without `lat`/`lon` there is nothing to measure against, so no bound is applied.
+>
+> Callers are excluded from their own results. The identity used is the **JWT**, not the `userId`
+> query parameter, so you cannot request a feed filtered as somebody else; the parameter remains
+> only as a fallback for the legacy unauthenticated callers.
+
 ### GET `/api/pets/nearby?lat=43.65&lon=-79.38&radiusKm=5&limit=50`
 
 Pets around a map point. Locations come from the Redis geo index (`users:geo`),
@@ -314,6 +324,37 @@ To chat about an item: `POST /api/messages` with `contextType: "LISTING"`,
 
 ---
 
+## 6b. Demo seeding — `/api/demo` 🔒 Bearer token required
+
+Present only when `app.demo-seed.enabled=true` (`APP_DEMO_SEED_ENABLED`). **Defaults to false** —
+the opposite of the load-test endpoints — because it writes user accounts.
+
+### POST `/api/demo/seed?lat=43.4802&lon=-80.5179`
+
+Fills an empty deployment with 20 owners, 26 pets, 14 walk/date invitations with their pending
+requests, 18 posts, 19 comments, 6 events, 14 listings, conversations, reviews and notifications,
+and pushes every seeded user through the telemetry consumer so they appear in `users:geo` with
+live presence.
+
+`lat`/`lon` are optional and must be supplied together. They **relocate the whole seeded city**,
+preserving the neighbourhoods' relative geometry. Pass the coordinates you will be demoing from —
+the feeds above are distance-bounded, so a catalogue seeded on another continent returns nothing.
+
+```json
+{ "seeded": true, "message": "Seeded. Every account uses the same demo password.",
+  "counts": { "users": 22, "pets": 26, "invitations": 14, "posts": 18, "…": 0 },
+  "logins": ["maya.arjun@pawpal.demo", "…"] }
+```
+
+One-shot: running it again returns `"seeded": false` with the existing counts and changes nothing.
+There is no delete path — to start over, destroy the Postgres volume. Every seeded account signs
+in with `APP_DEMO_SEED_PASSWORD`. The account that calls this also receives three notifications,
+so the caller's own bell isn't empty.
+
+### GET `/api/demo/seed/status` → `{ seeded, counts, logins }`
+
+---
+
 ## 7. Notifications — `/api/notifications`
 
 ### GET `/api/notifications?userId=42`
@@ -459,8 +500,17 @@ Kafka topic, so message/request POSTs never wait on notification writes.
 - Media upload (pet photos, listing photos, message images) — the mobile app uploads to
   Firebase Storage client-side and sends URL strings; there is still no server-side upload endpoint.
 - Social feed (posts/comments/friendships) has repositories but no endpoints (no Feed tab in the design).
-- No rate limiting; login performs unthrottled BCrypt (~100 ms CPU per attempt). Planned at the
-  WAF/ALB rather than in-app.
+- **Login is rate limited (2026-08-11).** Two independent windows, both answering `429` with a
+  `Retry-After` header, on `/api/auth/{login,register,google}` and the `/api/users/*` aliases:
+  - **per IP** — 20 attempts/60s, enforced in a servlet filter *before* the body is parsed, so a
+    blocked request never reaches BCrypt. This is the CPU-exhaustion defence.
+  - **per account** — 10 *failed* attempts/900s, cleared by a successful login, so a spray spread
+    across many source addresses still hits a wall.
+
+  Repeating one email trips the account budget first: 11 × `401`, then `429`. Spreading attempts
+  across different emails trips the IP budget instead. Counters live in Redis and **fail open** —
+  if Redis is unreachable the request is allowed, because a broken cache must not lock the whole
+  user base out of a healthy application. Tunable via `app.ratelimit.login.*`.
 - Chat is still poll-based; no WebSocket.
 - **Matching now requires live presence.** A user only appears as a walking partner if they have
   pinged `POST /api/telemetry/location` recently (6h presence TTL). Seeding accounts without

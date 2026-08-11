@@ -28,6 +28,27 @@
 >   processing, or dashboard aggregation — the highest-value gap remaining.
 > - **§4.7 Secrets — partially resolved.** `deploy/` uses `.env` + SSM Parameter Store;
 >   `docker-compose.aws.yml` still carries a plaintext JWT secret and should be rotated.
+>
+> **Update (2026-08-11):** body still unchanged, per the convention above.
+>
+> - **Rate limiting — now closed.** The gap called "the sharpest edge" in the 2026-08-09 note is
+>   fixed. Login is throttled per source address (20/60s, in a filter ahead of BCrypt) and per
+>   account (10 failures/900s, cleared on success), both answering `429` + `Retry-After`, both
+>   Redis-backed and both failing open. Detail in `SECURITY_FIXES.md` §8.
+> - **§4.7 Secrets — now resolved.** `docker-compose.aws.yml` carries no plaintext values; every
+>   secret is `${VAR:?message}` from a gitignored `.env`, so compose refuses to start and names
+>   what is missing instead of falling back to a default shared by every deployment.
+> - **§4.4 Testing — improved, same shape.** 39 JVM tests, up from 13, and the new ones cover the
+>   two areas the note called the highest-value gap: matching (self-exclusion, preference
+>   filtering) and the distance-bounded discovery feeds, plus the rate limiter's window,
+>   fail-open and boundary behaviour. Telemetry processing and dashboard aggregation are still
+>   uncovered.
+> - **New finding, found and fixed the same day.** The discovery feeds returned every open
+>   invitation in the database and used distance only for the label — see `SECURITY_FIXES.md` §9.
+>   Worth recording because the earlier reviews missed it: they audited
+>   `/api/pets/{partners,blind-dates}`, but the mobile app reads
+>   `/api/{walk,date}/invitations/feed`, which is different code. Auditing the endpoint you assume
+>   the client calls is not the same as auditing the one it does.
 > - **Redis key layout changed.** Section 1 below describes `users:meta:{id}` carrying `lastSeen`
 >   under a 6h TTL. That hash is now split: `users:meta:*` holds durable `active`/`preferences`
 >   with **no TTL**, and `users:presence:*` holds `lastSeen`/`available` and expires. The old

@@ -528,10 +528,15 @@ rationale.
   error counters, push delivery counters.
 
 ### Known Issues
-1. **Hardcoded secrets:** `docker-compose.aws.yml` still carries a plaintext JWT secret and DB
-   password. Rotate before any public deployment; `deploy/` uses `.env` + SSM instead.
-2. **No rate limiting:** login performs unthrottled BCrypt (~100 ms CPU per attempt), a cheap
-   CPU-exhaustion vector. Best placed at the WAF/ALB.
+1. **Plain HTTP in the single-instance deployment:** tokens and the Grafana admin password cross
+   the network in the clear. Fine for a demo, not for anything real. (`docker-compose.aws.yml` no
+   longer carries plaintext secrets — every one is `${VAR:?}` sourced from a gitignored `.env`, so
+   compose refuses to start and names the missing variable rather than falling back to a shared
+   default.)
+2. **Rate limiting is per-source, and sources are cheap:** login is now throttled per IP and per
+   account (see "Rate limiting" above), which stops single-source BCrypt exhaustion and password
+   spraying. It does not stop a botnet spread thinly across thousands of addresses — that still
+   wants the WAF/ALB.
 3. **No dead-letter topic:** telemetry processing is deliberately at-most-once (the next ping
    supersedes a lost one), and error counters now make failures visible, but poison messages are
    still dropped rather than parked.
@@ -601,7 +606,8 @@ This bitmask is unrelated to the PawPal domain (`Pet`, `Post`, etc.) — it's so
 - [x] Schema migrations (Flyway) instead of `ddl-auto: update`
 - [ ] CI/CD pipeline (GitHub Actions)
 - [x] Cloud deployment — 2-node + witness topology in [`deploy/`](deploy/README.md)
-- [ ] Rate limiting at the edge (WAF/ALB)
+- [x] Rate limiting on the auth endpoints (in-app, per IP + per account)
+- [ ] Rate limiting at the edge (WAF/ALB) — for distributed sources the in-app limiter can't see
 - [ ] Load test at the 50k-user target, with p95/p99 captured
 - [ ] Load testing & optimization
 - [ ] Security audit

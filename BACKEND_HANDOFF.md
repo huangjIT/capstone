@@ -126,10 +126,11 @@ endpoints** (the current 20-screen design has no Feed tab, so this was depriorit
 
 ### 10. Scale/quality debt (doesn't block the demo)
 
-- No pagination on list endpoints (full lists returned) — fine at demo scale.
-- No rate limiting. `/api/test-data/*` and `/api/inspector/*` are now gated behind
-  `app.test-endpoints.enabled` and switched off in the AWS deployments, so the load generators are
-  no longer wide open — but login still does unthrottled BCrypt.
+- No pagination on list endpoints (full lists returned) — fine at demo scale. The discovery feeds
+  are now bounded by *distance* instead (25 km default, 100 km cap), which also bounds their size.
+- Rate limiting covers the auth endpoints only (per IP + per account, `429` + `Retry-After`).
+  `/api/test-data/*` and `/api/inspector/*` remain gated behind `app.test-endpoints.enabled` and
+  switched off in the AWS deployments. Everything else is unthrottled.
 - CORS is configurable via `app.cors.allowed-origins` (still permissive in dev config).
 - Schema is owned by **Flyway** (`backend/src/main/resources/db/migration`) with
   `ddl-auto: validate` — the app refuses to start if entities and schema disagree.

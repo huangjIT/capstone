@@ -13,6 +13,18 @@
 > - **Walk/date boards**: one engine (`PartnerBoardService`) + `partner_invitations` /
 >   `partner_requests` tables (type = WALK|DATE). Feeds are cached in Redis
 >   (`feed:board:{type}`, 30 s TTL, invalidated on every write) and personalized per caller.
+> - **Feeds are distance-bounded (2026-08-11).** When `lat`/`lng` are supplied,
+>   `/api/{walk,date}/invitations/feed` return only invitations within `radiusKm` (optional;
+>   defaults to 25 km, clamped server-side to 100 km) and sort them nearest-first. Previously
+>   distance was computed for the label only and every open invitation was returned. **If a feed
+>   looks empty, check the caller's coordinates before suspecting the data** — that is now the
+>   most common cause. Omitting `lat`/`lng` disables the bound, since there is nothing to
+>   measure against.
+> - **Notifications have one entry point (2026-08-11).** The bell on `HomeMapScreen` is the only
+>   route to the list; the 💬/🔔 buttons on the Walk, Date and Me headers and the Walk tab's red
+>   dot are gone, as is `WalkBadgeContext`. The unread count comes from
+>   `GET /api/notifications/unread-count` on screen focus. `/api/messages/unread-counts` is no
+>   longer polled by the Walk and Date screens.
 > - **Messages**: `POST /api/messages` accepts `walkRequestId`/`dateRequestId`/`marketItemId`
 >   aliases (context types `WALK_REQUEST`/`DATE_REQUEST`/`LISTING`); the per-thread getters
 >   mark incoming messages read on fetch; `/api/messages/unread-counts` → `{WALK,DATE,MARKET}`

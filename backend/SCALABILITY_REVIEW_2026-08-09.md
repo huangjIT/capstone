@@ -127,9 +127,16 @@ Redis caller while it runs.
   internet-reachable box, that lets anyone run a load test against you.
 - `KEYS` replaced with cursor-based `SCAN`.
 
-**Still open:** rate limiting. Login performs unthrottled BCrypt (~100 ms of CPU per attempt),
-a cheap CPU-exhaustion vector. Best placed at the WAF/ALB layer of the target architecture, or
-Bucket4j in-app.
+**Closed 2026-08-11:** rate limiting shipped in-app rather than waiting for the WAF/ALB, because
+the single-instance deployment has no edge to put it at. `LoginRateLimitFilter` counts attempts
+per source address (20/60s) ahead of body parsing, so a rejected request never reaches BCrypt;
+`AuthService` counts *failures* per account (10/900s, cleared on success) so a spray across many
+addresses still hits a wall. Redis-backed, so the limit is per deployment rather than per JVM and
+survives a restart — an attacker cannot reset their budget by crashing the app. Every Redis error
+fails open by design.
+
+Not a substitute for the edge: this caps a single source, not a botnet spread thinly across
+thousands of addresses. The WAF item stays on the Phase 2 list.
 
 ### 7. `ddl-auto: update` — FIXED
 

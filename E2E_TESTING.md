@@ -16,9 +16,17 @@ Throughout: **Device A** and **Device B** are two phones with two different acco
 
 ### ⚠️ Read this first: plain HTTP is blocked in release builds
 
+> **Update 2026-08-11 — already handled for the current deployment.** The main manifest now
+> carries `android:networkSecurityConfig="@xml/network_security_config"`, and that file permits
+> cleartext **for one hard-coded host only** (the EC2 IP), leaving every other destination
+> HTTPS-only. If the backend moves to a different address, edit
+> `android/app/src/main/res/xml/network_security_config.xml` and rebuild, or the APK will fail
+> exactly as described below. Note `android/` is gitignored, so this file does not survive a
+> fresh `expo prebuild` — reapply it, or move the setting into `app.json`.
+
 `android/app/src/debug/AndroidManifest.xml` sets `usesCleartextTraffic="true"`, but the
-**main manifest does not**. Debug builds can therefore reach `http://<EC2_IP>:8080` and
-**release APKs cannot** — Android has blocked cleartext HTTP by default since API 28.
+**main manifest did not**. Debug builds can therefore reach `http://<EC2_IP>:8080` and
+**release APKs could not** — Android has blocked cleartext HTTP by default since API 28.
 
 The failure mode is nasty: no crash, no permission prompt, just every request failing
 with a generic network error. If your APK "can't log in" but the same code works in the

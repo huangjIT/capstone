@@ -24,7 +24,7 @@
 | Chat delivery | 4 s poll (done) | poll with `?sinceId=` cursor | WebSocket/SSE push |
 | Feed refetch on every tab focus | keep | stale-while-revalidate cache (React Query) | + ETag/`If-None-Match` |
 | No pagination on lists | `?limit=` cap on feeds/notifications | `Pageable` everywhere | cursor pagination on messages |
-| `PetQueryService` N+1s | leave (endpoints unused by app) | batch `IN` query + pipelined GEOPOS | delete with frontend1 retirement |
+| `PetQueryService` N+1s | ✅ done — one `GEOSEARCH` + one `IN` query | — | delete with frontend1 retirement |
 | `firebase` full web SDK in bundle | keep | REST upload straight to Storage | `@react-native-firebase/storage` |
 | `ddl-auto: update` | keep for dev | Flyway baseline | Flyway + CI migration check |
 | 5 always-on containers | stop Grafana/Prometheus when unused | compose `--profile monitoring` | plain `redis:7-alpine` instead of redis-stack |
@@ -72,8 +72,8 @@ Confirmed with `git ls-files`:
 - **No HTTP compression** — feed responses are verbose denormalized JSON over mobile networks. Fix: `server.compression.enabled: true` (one line).
 
 ### 3.2 Query-pattern problems (legacy discovery endpoints — used by frontend1 only)
-- **`PetQueryService.findNearbyPets`: N+1 against Postgres** — one `findWithOwnerByOwnerId` query *per geo hit* (up to `limit=50` queries per map pan). Fix: collect userIds from the geo result, one `WHERE owner_id IN (...)` query.
-- **`findWalkingPartners` / `findBlindDatePets`: 2 Redis round-trips per candidate pet** (`GEOPOS` + `HGET` each, unpipelined) — 100 candidates = 200 sequential Redis calls. Fix: single pipelined batch, or `GEOSEARCH` once and join in memory.
+- ~~**`PetQueryService.findNearbyPets`: N+1 against Postgres**~~ — **fixed 2026-08-11.** Positions are collected from the geo result first, then every owner's pets are read in one `findWithOwnerByOwnerIdIn(...)`.
+- ~~**`findWalkingPartners` / `findBlindDatePets`: 2 Redis round-trips per candidate pet**~~ — **fixed 2026-08-11.** One `GEOSEARCH` now answers both "who is inside the radius" and "how far", and only those owners are read from Postgres. The direction of the join inverted: it used to load every playdate-available pet and ask Redis about each owner; it now asks Redis first and reads only the matching rows, so the row count scales with the neighbourhood instead of the user table. That bound also fixed a correctness bug — see `SECURITY_FIXES.md` §9.
 - **No pagination anywhere** — every list endpoint (`/api/pets/partners`, `/api/notifications`, feeds, marketplace, conversations) returns the full table slice. Fine at demo scale, collapses at load-test scale. Fix: `Pageable` + `?limit/offset` on the hot lists first (feeds, notifications, marketplace).
 - **`MessageRepository.findRecentConversations`** — native `DISTINCT ON` over a user's *entire* message history on every inbox open. OK with an index, but it scans linearly with message volume; needs a `LIMIT` and eventually a conversations table.
 - **`MarketService.chats` / notifications enrichment** load all of a user's LISTING messages / all requests into memory and group in Java — acceptable at demo scale (documented), but they're the first things to paginate after the load test.
@@ -128,7 +128,7 @@ Five always-on containers for local dev: Postgres, **Redis Stack** (includes the
 
 **Next sprint:**
 5. Kafka: plain String serializers (kill double serialization), producer `linger.ms`/`lz4`.
-6. Fix `PetQueryService` N+1s (batch SQL + pipelined Redis) — or delete the endpoints with frontend1.
+6. ~~Fix `PetQueryService` N+1s~~ — done 2026-08-11 (one `GEOSEARCH` + one `IN` query).
 7. Pagination on feeds/notifications/marketplace/conversations.
 8. `markContextRead` only when unread messages exist in the fetched thread.
 9. Replace the full `firebase` SDK with a lightweight upload path.
