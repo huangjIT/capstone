@@ -10,6 +10,7 @@ import org.example.pet_social.repository.MarketplaceItemRepository;
 import org.example.pet_social.repository.MessageRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.ArrayList;
@@ -69,6 +70,9 @@ public class MarketService {
         return withUnread(items, userId);
     }
 
+    // open-in-view is false, so the session closes with the repository call. The DTO reads
+    // item.seller (lazy) while mapping, so the write and the mapping must share one transaction.
+    @Transactional
     public MarketItemResponse create(Long userId, ItemBody body) {
         validate(body);
         User seller = userService.getUserById(userId);
@@ -78,6 +82,7 @@ public class MarketService {
         return MarketItemResponse.from(itemRepository.save(item), 0);
     }
 
+    @Transactional
     public MarketItemResponse update(Long userId, Long itemId, ItemBody body) {
         validate(body);
         MarketplaceItem item = owned(userId, itemId);
@@ -96,6 +101,7 @@ public class MarketService {
     }
 
     /** Soft delete: withdrawn items vanish from every list but their chats survive. */
+    @Transactional
     public void withdraw(Long userId, Long itemId) {
         MarketplaceItem item = owned(userId, itemId);
         item.setStatus("WITHDRAWN");
