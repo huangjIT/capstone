@@ -17,7 +17,8 @@ import * as Location from 'expo-location';
 import { COLORS } from '../constants/colors';
 import { FilterRow } from '../components/FilterRow';
 import { PetCard } from '../components/PetCard';
-import { apiGet } from '../utils/api';
+import { ErrorNotice } from '../components/ErrorNotice';
+import { apiGet, errorMessage } from '../utils/api';
 
 export interface WalkInvitation {
   id: string;
@@ -85,6 +86,7 @@ export const FindPartnersScreen: React.FC<FindPartnersScreenProps> = ({ navigati
   const [unreadCountMap, setUnreadCountMap] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string>();
   const isFocused = useRef(false);
 
   const invAnim = useRef(new Animated.Value(1)).current;
@@ -119,7 +121,10 @@ export const FindPartnersScreen: React.FC<FindPartnersScreenProps> = ({ navigati
 
   const loadData = useCallback(async () => {
     try {
+      setLoadError(undefined);
       let feedPath = '/api/walk/invitations/feed';
+      // Location is optional here: without it the feed is fetched unlocated
+      // rather than not at all, so a denied permission is not an error.
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status === 'granted') {
@@ -136,7 +141,10 @@ export const FindPartnersScreen: React.FC<FindPartnersScreenProps> = ({ navigati
       setMyInvitations(invs);
       setFeed(feedItems);
       setSentRequestIds(new Set(sentReqs.map(r => r.invitationId)));
-    } catch (_) {
+    } catch (e) {
+      // Without this the list rendered its empty state, so a failed load was
+      // indistinguishable from "no walks near you".
+      setLoadError(errorMessage(e, 'Could not load walks.'));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -154,7 +162,10 @@ export const FindPartnersScreen: React.FC<FindPartnersScreenProps> = ({ navigati
       const map: Record<string, number> = {};
       data.forEach(item => { map[item.invitationId] = item.unreadCount; });
       setUnreadCountMap(map);
-    } catch (_) {}
+    } catch (_) {
+      // Unread dots only, on a 5s poll. Keeping the previous counts is better
+      // than interrupting the list, and the next tick corrects them.
+    }
   }, []);
 
   useFocusEffect(useCallback(() => {
@@ -292,6 +303,8 @@ export const FindPartnersScreen: React.FC<FindPartnersScreenProps> = ({ navigati
         <Text style={styles.sectionTitle}>Nearby Walking Partners</Text>
         {loading ? (
           <ActivityIndicator size="large" color={COLORS.primary} style={{ marginTop: 40 }} />
+        ) : loadError ? (
+          <ErrorNotice message={loadError} onRetry={loadData} />
         ) : filtered.length === 0 ? (
           <View style={styles.emptyFeed}>
             <Text style={styles.emptyFeedText}>No walk partners nearby yet.</Text>

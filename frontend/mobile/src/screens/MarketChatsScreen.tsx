@@ -12,7 +12,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { COLORS } from '../constants/colors';
-import { apiGet } from '../utils/api';
+import { ErrorNotice } from '../components/ErrorNotice';
+import { apiGet, errorMessage } from '../utils/api';
 
 interface MarketChat {
   itemId: string;
@@ -53,12 +54,17 @@ export const MarketChatsScreen: React.FC<MarketChatsScreenProps> = ({ navigation
   const [chats, setChats] = useState<MarketChat[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string>();
 
   const loadData = useCallback(async () => {
     try {
+      setLoadError(undefined);
       const data = await apiGet<MarketChat[]>('/api/market/chats');
       setChats(data);
-    } catch (_) {
+    } catch (e) {
+      // A buyer who has messages but sees "no chats" will assume the seller
+      // never replied, which is worse than an error.
+      setLoadError(errorMessage(e, 'Could not load your chats.'));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -104,6 +110,8 @@ export const MarketChatsScreen: React.FC<MarketChatsScreenProps> = ({ navigation
         ListEmptyComponent={
           loading ? (
             <ActivityIndicator size="large" color={COLORS.primary} style={{ marginTop: 60 }} />
+          ) : loadError ? (
+            <ErrorNotice message={loadError} onRetry={loadData} />
           ) : (
             <View style={styles.empty}>
               <Text style={styles.emptyText}>No chats yet. Message a seller from an item!</Text>

@@ -12,7 +12,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { COLORS } from '../constants/colors';
 import { NotifItem } from '../components/NotifItem';
-import { apiGet } from '../utils/api';
+import { ErrorNotice } from '../components/ErrorNotice';
+import { apiGet, errorMessage } from '../utils/api';
 
 export interface WalkNotification {
   id: string;
@@ -76,22 +77,29 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({ naviga
   const [notifications, setNotifications] = useState<WalkNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string>();
 
   const loadData = useCallback(async () => {
     try {
+      setLoadError(undefined);
+      // Each half used to swallow its own failure and resolve to [], so the
+      // outer catch never fired and a total outage rendered as "no
+      // notifications yet". Both halves hit the same backend, so letting a
+      // failure propagate is the honest signal.
       const [walk, date] = await Promise.all([
         filter === 'date'
           ? Promise.resolve([] as WalkNotification[])
-          : apiGet<WalkNotification[]>('/api/walk/notifications').catch(() => [] as WalkNotification[]),
+          : apiGet<WalkNotification[]>('/api/walk/notifications'),
         filter === 'walk'
           ? Promise.resolve([] as WalkNotification[])
-          : apiGet<WalkNotification[]>('/api/date/notifications').catch(() => [] as WalkNotification[]),
+          : apiGet<WalkNotification[]>('/api/date/notifications'),
       ]);
       const merged = [...walk, ...date].sort((a, b) =>
         new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime()
       );
       setNotifications(merged);
-    } catch (_) {
+    } catch (e) {
+      setLoadError(errorMessage(e, 'Could not load notifications.'));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -171,6 +179,8 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({ naviga
       ListEmptyComponent={
         loading ? (
           <ActivityIndicator size="large" color={COLORS.primary} style={{ marginTop: 60 }} />
+        ) : loadError ? (
+          <ErrorNotice message={loadError} onRetry={loadData} />
         ) : (
           <View style={styles.empty}>
             <Text style={styles.emptyText}>No notifications yet.</Text>

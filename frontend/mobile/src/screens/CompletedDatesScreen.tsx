@@ -12,7 +12,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { COLORS } from '../constants/colors';
-import { apiGet } from '../utils/api';
+import { ErrorNotice } from '../components/ErrorNotice';
+import { apiGet, errorMessage } from '../utils/api';
 
 interface CompletedParticipant {
   userId: string;
@@ -42,12 +43,17 @@ export const CompletedDatesScreen: React.FC<CompletedDatesScreenProps> = ({ navi
   const [dates, setDates] = useState<CompletedDate[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string>();
 
   const loadData = useCallback(async () => {
     try {
+      setLoadError(undefined);
       const data = await apiGet<CompletedDate[]>('/api/date/invitations/completed');
       setDates(data);
-    } catch (_) {
+    } catch (e) {
+      // "No completed dates yet" is a very believable lie when the request
+      // failed, so say which one actually happened.
+      setLoadError(errorMessage(e, 'Could not load completed dates.'));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -78,6 +84,8 @@ export const CompletedDatesScreen: React.FC<CompletedDatesScreenProps> = ({ navi
         ListEmptyComponent={
           loading ? (
             <ActivityIndicator size="large" color={COLORS.purple} style={{ marginTop: 40 }} />
+          ) : loadError ? (
+            <ErrorNotice message={loadError} onRetry={loadData} />
           ) : (
             <View style={styles.emptyWrap}>
               <Text style={styles.emptyEmoji}>💕</Text>

@@ -65,6 +65,8 @@ async function reverseGeocode(coord: LatLng): Promise<string> {
       .join(', ');
     if (label) return label;
   } catch {}
+  // Last resort in a deliberate fallback chain: a name is nice to have, but raw
+  // coordinates still identify the spot, so neither lookup failing is an error.
   return `${coord.latitude.toFixed(4)}, ${coord.longitude.toFixed(4)}`;
 }
 

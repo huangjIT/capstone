@@ -18,7 +18,8 @@ import * as Location from 'expo-location';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { COLORS } from '../constants/colors';
-import { apiGet, apiPost } from '../utils/api';
+import { ErrorNotice } from '../components/ErrorNotice';
+import { apiGet, apiPost, errorMessage } from '../utils/api';
 import type { WalkFeedItem } from './FindPartnersScreen';
 
 const DEFAULT_REGION = {
@@ -77,6 +78,7 @@ const PosterMarker: React.FC<{
 export const HomeMapScreen: React.FC<{ navigation?: any }> = ({ navigation }) => {
   const insets = useSafeAreaInsets();
   const [feed, setFeed] = useState<MapFeedItem[]>([]);
+  const [loadError, setLoadError] = useState<string>();
   const [selectedItem, setSelectedItem] = useState<MapFeedItem | null>(null);
   const [sentIds, setSentIds] = useState<Set<string>>(new Set());
   const [connecting, setConnecting] = useState(false);
@@ -98,7 +100,10 @@ export const HomeMapScreen: React.FC<{ navigation?: any }> = ({ navigation }) =>
 
   const loadFeed = useCallback(async () => {
     try {
+      setLoadError(undefined);
       let feedPath = '/api/walk/invitations/feed';
+      // Location is optional: without it the feed is fetched unlocated rather
+      // than not at all, so a denied permission is not an error.
       try {
         const { status } = await Location.getForegroundPermissionsAsync();
         if (status === 'granted') {
@@ -108,13 +113,21 @@ export const HomeMapScreen: React.FC<{ navigation?: any }> = ({ navigation }) =>
       } catch (_) {}
       const [items, sentReqs] = await Promise.all([
         apiGet<MapFeedItem[]>(feedPath),
+        // Which requests you've already sent only greys out buttons; the feed is
+        // still worth showing without it.
         apiGet<Array<{ invitationId: string }>>('/api/walk/requests/my-sent').catch(() => []),
       ]);
       setFeed(items);
       setSentIds(new Set(sentReqs.map(r => r.invitationId)));
-    } catch (_) {}
+    } catch (e) {
+      // This is the first screen after login: silently empty here reads as
+      // "nobody is around", which is the wrong story when the backend is down.
+      setLoadError(errorMessage(e, 'Could not load nearby walks.'));
+    }
   }, []);
 
+  // Just a badge count — a failure leaves the previous number rather than
+  // interrupting the map, so it stays silent on purpose.
   const loadUnreadNotifs = useCallback(async () => {
     try {
       const { count } = await apiGet<{ count: number }>('/api/notifications/unread-count');
@@ -307,7 +320,11 @@ export const HomeMapScreen: React.FC<{ navigation?: any }> = ({ navigation }) =>
                 <Text style={styles.seeAllText}>See all</Text>
               </TouchableOpacity>
             </View>
-            {feed.length === 0 ? (
+            {loadError ? (
+              <View style={styles.emptyRow}>
+                <ErrorNotice message={loadError} onRetry={loadFeed} compact />
+              </View>
+            ) : feed.length === 0 ? (
               <View style={styles.emptyRow}>
                 <Text style={styles.emptyText}>No walk partners nearby yet.</Text>
               </View>

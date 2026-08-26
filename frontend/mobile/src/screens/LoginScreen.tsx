@@ -8,13 +8,13 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Alert,
   ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 import { COLORS } from '../constants/colors';
-import { apiPost, saveToken, saveUserId } from '../utils/api';
+import { apiPost, saveToken, saveUserId, errorMessage } from '../utils/api';
+import { validateEmail, validateLoginPassword } from '../utils/validation';
 
 // ── Google OAuth ─────────────────────────────────────────────────────────────
 // Web Client ID is required by GoogleSignin to obtain an ID token on Android.
@@ -42,6 +42,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  // Per-field messages shown under the input; formError is the server's answer
+  // (wrong password, throttled), which belongs to the form rather than a field.
+  const [emailError, setEmailError] = useState<string>();
+  const [passwordError, setPasswordError] = useState<string>();
+  const [formError, setFormError] = useState<string>();
 
   const handleGoogleSignIn = async () => {
     try {
@@ -56,25 +61,33 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
       navigation.reset({ index: 0, routes: [{ name: 'Tabs' }] });
     } catch (e: any) {
       if (e.code === statusCodes.SIGN_IN_CANCELLED) return;
-      Alert.alert('Google Sign In Failed', e.message || 'Something went wrong');
+      setFormError(errorMessage(e, 'Google sign-in failed. Please try again.'));
     } finally {
       setGoogleLoading(false);
     }
   };
 
   const handleSignIn = async () => {
-    if (!email || !password) {
-      Alert.alert('Error', 'Please enter email and password');
-      return;
-    }
+    // Format and presence are knowable here, so check them before spending a
+    // round trip; anything that depends on server state is the server's to say.
+    const nextEmailError = validateEmail(email);
+    const nextPasswordError = validateLoginPassword(password);
+    setEmailError(nextEmailError);
+    setPasswordError(nextPasswordError);
+    setFormError(undefined);
+    if (nextEmailError || nextPasswordError) return;
+
     try {
       setLoading(true);
-      const res = await apiPost<AuthResponse>('/api/auth/login', { email, password });
+      const res = await apiPost<AuthResponse>('/api/auth/login', {
+        email: email.trim(),
+        password,
+      });
       await saveToken(res.token);
       await saveUserId(res.userId);
       navigation.reset({ index: 0, routes: [{ name: 'Tabs' }] });
-    } catch (e: any) {
-      Alert.alert('Login Failed', e.message || 'Invalid email or password');
+    } catch (e) {
+      setFormError(errorMessage(e, 'Invalid email or password'));
     } finally {
       setLoading(false);
     }
@@ -127,25 +140,39 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
             <View style={styles.dividerLine} />
           </View>
 
+          {/* Server-side failure: wrong password, throttled, backend unreachable */}
+          {formError ? (
+            <View style={styles.formErrorBox}>
+              <Text style={styles.formErrorText}>{formError}</Text>
+            </View>
+          ) : null}
+
           {/* Email */}
           <Text style={styles.fieldLabel}>Email</Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, emailError ? styles.inputError : null]}
             value={email}
-            onChangeText={setEmail}
+            onChangeText={(t) => {
+              setEmail(t);
+              if (emailError) setEmailError(undefined);
+            }}
             placeholder="your@email.com"
             placeholderTextColor={COLORS.textMuted}
             keyboardType="email-address"
             autoCapitalize="none"
           />
+          {emailError ? <Text style={styles.fieldError}>{emailError}</Text> : null}
 
           {/* Password */}
           <Text style={styles.fieldLabel}>Password</Text>
-          <View style={styles.passwordWrap}>
+          <View style={[styles.passwordWrap, passwordError ? styles.inputError : null]}>
             <TextInput
               style={styles.passwordInput}
               value={password}
-              onChangeText={setPassword}
+              onChangeText={(t) => {
+                setPassword(t);
+                if (passwordError) setPasswordError(undefined);
+              }}
               placeholder="••••••••"
               placeholderTextColor={COLORS.textMuted}
               secureTextEntry={!showPassword}
@@ -154,6 +181,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
               <Text style={styles.eyeIcon}>{showPassword ? '🙈' : '👁'}</Text>
             </TouchableOpacity>
           </View>
+          {passwordError ? <Text style={styles.fieldError}>{passwordError}</Text> : null}
 
           {/* Forgot password */}
           <TouchableOpacity style={styles.forgotWrap}>
@@ -232,6 +260,15 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.bg, borderRadius: 14, borderWidth: 1, borderColor: COLORS.border,
     paddingHorizontal: 16, paddingVertical: 13, fontSize: 15, color: COLORS.text, marginBottom: 16,
   },
+  inputError: { borderColor: COLORS.red },
+  // Pulled up under the input it belongs to, which the field's own marginBottom
+  // would otherwise push away.
+  fieldError: { fontSize: 12, color: COLORS.red, marginTop: -10, marginBottom: 12 },
+  formErrorBox: {
+    backgroundColor: '#FEF2F2', borderColor: '#FECACA', borderWidth: 1,
+    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, marginBottom: 18,
+  },
+  formErrorText: { fontSize: 13, color: '#B91C1C', lineHeight: 18 },
   passwordWrap: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.bg,
     borderRadius: 14, borderWidth: 1, borderColor: COLORS.border, marginBottom: 8,

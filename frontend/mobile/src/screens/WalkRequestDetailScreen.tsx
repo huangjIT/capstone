@@ -14,7 +14,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/colors';
 import { ChatBubble } from '../components/ChatBubble';
 import { ChatInputBar } from '../components/ChatInputBar';
-import { apiGet, apiPost, apiPut } from '../utils/api';
+import { ErrorNotice } from '../components/ErrorNotice';
+import { apiGet, apiPost, apiPut, errorMessage } from '../utils/api';
 import type { WalkNotification } from './NotificationsScreen';
 
 interface WalkRequestDetailScreenProps {
@@ -59,6 +60,7 @@ export const WalkRequestDetailScreen: React.FC<WalkRequestDetailScreenProps> = (
   const [expanded, setExpanded] = useState(true);
   const [localStatus, setLocalStatus] = useState(notif?.status ?? 'PENDING');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [loadError, setLoadError] = useState<string>();
   const scrollRef = useRef<ScrollView>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -69,7 +71,13 @@ export const WalkRequestDetailScreen: React.FC<WalkRequestDetailScreenProps> = (
         `/api/messages/${isDate ? 'date-request' : 'walk-request'}/${requestId}`
       );
       setMessages(data);
-    } catch (_) {}
+      setLoadError(undefined);
+    } catch (e) {
+      // Rendered only while the thread is empty: this polls every 4s, so a blip
+      // with messages on screen stays quiet, but a thread that never loaded
+      // must not read as "No messages yet. Say hi!".
+      setLoadError(errorMessage(e, 'Could not load messages.'));
+    }
   }, [requestId, isDate]);
 
   // Poll every 1 second
@@ -322,7 +330,9 @@ export const WalkRequestDetailScreen: React.FC<WalkRequestDetailScreenProps> = (
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.chatArea}>
-          {messages.length === 0 ? (
+          {messages.length === 0 && loadError ? (
+            <ErrorNotice message={loadError} onRetry={fetchMessages} />
+          ) : messages.length === 0 ? (
             <Text style={styles.emptyChatText}>No messages yet. Say hi!</Text>
           ) : (
             messages.map(msg => (

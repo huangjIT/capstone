@@ -17,7 +17,8 @@ import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
 import { COLORS } from '../constants/colors';
-import { apiPost, apiGet } from '../utils/api';
+import { ErrorNotice } from '../components/ErrorNotice';
+import { apiPost, apiGet, errorMessage } from '../utils/api';
 import { uploadImage } from '../utils/uploadImage';
 import { ImageViewerModal } from '../components/ImageViewerModal';
 
@@ -47,6 +48,7 @@ export const PostDateInvitationScreen: React.FC<PostDateInvitationScreenProps> =
   const insets = useSafeAreaInsets();
   const [pets, setPets] = useState<Pet[]>([]);
   const [petsLoaded, setPetsLoaded] = useState(false);
+  const [petsError, setPetsError] = useState<string>();
   const [selectedPetId, setSelectedPetId] = useState<string | null>(null);
   const [location, setLocation] = useState('');
   const [locationCoords, setLocationCoords] = useState<{ latitude: number; longitude: number } | null>(null);
@@ -61,14 +63,22 @@ export const PostDateInvitationScreen: React.FC<PostDateInvitationScreenProps> =
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
 
-  useFocusEffect(useCallback(() => {
+  const loadPets = useCallback(() => {
+    setPetsError(undefined);
     apiGet<Pet[]>('/api/pets/my').then(list => {
       setPets(list);
       if (list.length === 1) setSelectedPetId(list[0].id);
-    }).catch(() => {}).finally(() => setPetsLoaded(true));
-  }, []));
+    }).catch(e => {
+      setPetsError(errorMessage(e, 'Could not load your pets.'));
+    }).finally(() => setPetsLoaded(true));
+  }, []);
 
-  const noPetsYet = petsLoaded && pets.length === 0;
+  useFocusEffect(useCallback(() => { loadPets(); }, [loadPets]));
+
+  // A failed fetch must not count as "no pets": that showed the "Add a pet
+  // first" screen to people who already have one, sending them off to create
+  // a duplicate instead of retrying.
+  const noPetsYet = petsLoaded && !petsError && pets.length === 0;
 
   const useCurrentLocation = async () => {
     try {
@@ -184,7 +194,9 @@ export const PostDateInvitationScreen: React.FC<PostDateInvitationScreenProps> =
           <View style={styles.backBtn} />
         </View>
 
-        {noPetsYet ? (
+        {petsError ? (
+          <ErrorNotice message={petsError} onRetry={loadPets} />
+        ) : noPetsYet ? (
           <View style={styles.emptyPetsWrap}>
             <Text style={styles.emptyPetsEmoji}>🐾</Text>
             <Text style={styles.emptyPetsTitle}>Add a pet first</Text>

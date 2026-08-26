@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -18,7 +18,8 @@ import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
 import { COLORS } from '../constants/colors';
-import { apiPut, apiDelete, apiGet } from '../utils/api';
+import { ErrorNotice } from '../components/ErrorNotice';
+import { apiPut, apiDelete, apiGet, errorMessage } from '../utils/api';
 import { uploadImage } from '../utils/uploadImage';
 import { ImageViewerModal } from '../components/ImageViewerModal';
 
@@ -60,6 +61,7 @@ export const EditDateInvitationScreen: React.FC<EditDateInvitationScreenProps> =
   const [timePickerVisible, setTimePickerVisible] = useState(false);
   const [message, setMessage] = useState(invitation?.message || '');
   const [saving, setSaving] = useState(false);
+  const [petsError, setPetsError] = useState<string>();
   const [withdrawing, setWithdrawing] = useState(false);
   const [confirmVisible, setConfirmVisible] = useState(false);
   const [images, setImages] = useState<string[]>(invitation?.imageUrls ?? []);
@@ -83,9 +85,16 @@ export const EditDateInvitationScreen: React.FC<EditDateInvitationScreenProps> =
   const dateLabel = selectedDate ? formatDate(selectedDate) : (invitation?.date || 'Select date');
   const timeLabel = selectedTime ? formatTime(selectedTime) : (invitation?.time || 'Select time');
 
-  useEffect(() => {
-    apiGet<Pet[]>('/api/pets/my').then(setPets).catch(() => {});
+  const loadPets = useCallback(() => {
+    setPetsError(undefined);
+    apiGet<Pet[]>('/api/pets/my')
+      .then(setPets)
+      // Silently empty, the pet selector vanished and the edit form looked as
+      // though the invitation had no pet attached.
+      .catch(e => setPetsError(errorMessage(e, 'Could not load your pets.')));
   }, []);
+
+  useEffect(() => { loadPets(); }, [loadPets]);
 
   const useCurrentLocation = async () => {
     try {
@@ -214,6 +223,7 @@ export const EditDateInvitationScreen: React.FC<EditDateInvitationScreenProps> =
 
         <View style={styles.formBody}>
           {/* Pet selector — single choice */}
+          {petsError ? <ErrorNotice message={petsError} onRetry={loadPets} compact /> : null}
           {pets.length > 0 && (
             <View style={styles.fieldGroup}>
               <Text style={styles.fieldLabel}>💕 Pet Going on the Date</Text>

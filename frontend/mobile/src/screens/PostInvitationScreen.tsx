@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -15,7 +15,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { COLORS } from '../constants/colors';
 import { RouteMapPicker } from '../components/RouteMapPicker';
-import { apiPost, apiGet } from '../utils/api';
+import { ErrorNotice } from '../components/ErrorNotice';
+import { apiPost, apiGet, errorMessage } from '../utils/api';
 
 interface Pet {
   id: string;
@@ -53,10 +54,18 @@ export const PostInvitationScreen: React.FC<PostInvitationScreenProps> = ({ navi
   const [duration, setDuration] = useState('60');
   const [maxSpots, setMaxSpots] = useState('4');
   const [saving, setSaving] = useState(false);
+  const [petsError, setPetsError] = useState<string>();
 
-  useEffect(() => {
-    apiGet<Pet[]>('/api/pets/my').then(setPets).catch(() => {});
+  const loadPets = useCallback(() => {
+    setPetsError(undefined);
+    apiGet<Pet[]>('/api/pets/my')
+      .then(setPets)
+      // Silently empty, the pet selector just didn't render and there was no
+      // way to tell that from genuinely owning no pets.
+      .catch(e => setPetsError(errorMessage(e, 'Could not load your pets.')));
   }, []);
+
+  useEffect(() => { loadPets(); }, [loadPets]);
 
   const handlePost = async () => {
     if (!route.trim()) { Alert.alert('Validation', 'Please set a route or meeting point.'); return; }
@@ -128,6 +137,7 @@ export const PostInvitationScreen: React.FC<PostInvitationScreenProps> = ({ navi
 
         <View style={styles.formBody}>
           {/* Pet selector */}
+          {petsError ? <ErrorNotice message={petsError} onRetry={loadPets} compact /> : null}
           {pets.length > 0 && (
             <View style={styles.fieldGroup}>
               <Text style={styles.fieldLabel}>🐾 Walking With</Text>

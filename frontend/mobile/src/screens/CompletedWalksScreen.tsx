@@ -12,7 +12,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { COLORS } from '../constants/colors';
-import { apiGet } from '../utils/api';
+import { ErrorNotice } from '../components/ErrorNotice';
+import { apiGet, errorMessage } from '../utils/api';
 
 interface CompletedParticipant {
   userId: string;
@@ -43,12 +44,17 @@ export const CompletedWalksScreen: React.FC<CompletedWalksScreenProps> = ({ navi
   const [walks, setWalks] = useState<CompletedWalk[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string>();
 
   const loadData = useCallback(async () => {
     try {
+      setLoadError(undefined);
       const data = await apiGet<CompletedWalk[]>('/api/walk/invitations/completed');
       setWalks(data);
-    } catch (_) {
+    } catch (e) {
+      // "No completed walks yet" is a very believable lie when the request
+      // failed, so say which one actually happened.
+      setLoadError(errorMessage(e, 'Could not load completed walks.'));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -79,6 +85,8 @@ export const CompletedWalksScreen: React.FC<CompletedWalksScreenProps> = ({ navi
         ListEmptyComponent={
           loading ? (
             <ActivityIndicator size="large" color={COLORS.primary} style={{ marginTop: 40 }} />
+          ) : loadError ? (
+            <ErrorNotice message={loadError} onRetry={loadData} />
           ) : (
             <View style={styles.emptyWrap}>
               <Text style={styles.emptyEmoji}>🚶</Text>

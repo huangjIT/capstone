@@ -229,6 +229,8 @@ export const MeProfileScreen: React.FC<MeProfileScreenProps> = ({ navigation }) 
           // previous account's notifications.
           await unregisterPush();
           await clearToken();
+          // The local session is already gone by here, so a Google sign-out
+          // failure must not strand someone on a screen they can't leave.
           try { await GoogleSignin.signOut(); } catch (_) {}
           navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
         }}

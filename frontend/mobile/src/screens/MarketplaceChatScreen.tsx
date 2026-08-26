@@ -14,7 +14,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/colors';
 import { ChatBubble } from '../components/ChatBubble';
 import { ChatInputBar } from '../components/ChatInputBar';
-import { apiGet, apiPost } from '../utils/api';
+import { ErrorNotice } from '../components/ErrorNotice';
+import { apiGet, apiPost, errorMessage } from '../utils/api';
 import { categoryEmoji, conditionLabel } from './MarketplaceScreen';
 import { ImageViewerModal } from '../components/ImageViewerModal';
 
@@ -53,6 +54,7 @@ export const MarketplaceChatScreen: React.FC<MarketplaceChatScreenProps> = ({
   const otherUserAvatarParam: string | undefined = route?.params?.otherUserAvatarUrl ?? item?.sellerAvatarUrl;
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [loadError, setLoadError] = useState<string>();
   const scrollRef = useRef<ScrollView>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -66,7 +68,13 @@ export const MarketplaceChatScreen: React.FC<MarketplaceChatScreenProps> = ({
     try {
       const data = await apiGet<ChatMessage[]>(`/api/messages/market-item/${item.id}/${otherUserId}`);
       setMessages(data);
-    } catch (_) {}
+      setLoadError(undefined);
+    } catch (e) {
+      // Only surfaced when the thread is still empty (see render): this runs on
+      // a 4s poll, so a blip with messages already on screen should stay quiet,
+      // but a thread that never loaded must not look like "no messages yet".
+      setLoadError(errorMessage(e, 'Could not load messages.'));
+    }
   }, [item?.id, otherUserId]);
 
   useEffect(() => {
@@ -195,7 +203,9 @@ export const MarketplaceChatScreen: React.FC<MarketplaceChatScreenProps> = ({
         </View>
 
         {/* Chat Messages */}
-        {messages.length === 0 ? (
+        {messages.length === 0 && loadError ? (
+          <ErrorNotice message={loadError} onRetry={fetchMessages} />
+        ) : messages.length === 0 ? (
           <Text style={styles.emptyChatText}>No messages yet. Ask about the item!</Text>
         ) : (
           messages.map((msg) => (

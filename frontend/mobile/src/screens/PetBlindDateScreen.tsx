@@ -19,7 +19,8 @@ import * as Location from 'expo-location';
 import { COLORS } from '../constants/colors';
 import { FilterRow } from '../components/FilterRow';
 import { PetCard } from '../components/PetCard';
-import { apiGet, apiPost } from '../utils/api';
+import { ErrorNotice } from '../components/ErrorNotice';
+import { apiGet, apiPost, errorMessage } from '../utils/api';
 
 export interface DateInvitation {
   id: string;
@@ -92,6 +93,7 @@ export const PetBlindDateScreen: React.FC<PetBlindDateScreenProps> = ({ navigati
   const [feed, setFeed] = useState<DateFeedItem[]>([]);
   const [heartedIds, setHeartedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string>();
   const [refreshing, setRefreshing] = useState(false);
 
   const datesAnim = useRef(new Animated.Value(1)).current;
@@ -130,6 +132,8 @@ export const PetBlindDateScreen: React.FC<PetBlindDateScreenProps> = ({ navigati
     if (ageFilter !== 'Any') params.append('age', ageFilter);
     if (vaccineFilter !== 'All') params.append('vaccine', vaccineFilter);
     if (breedFilter !== 'All') params.append('breed', breedFilter);
+    // Location is optional: without it the feed comes back unlocated rather
+    // than not at all, so a denied permission is not an error.
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status === 'granted') {
@@ -144,6 +148,7 @@ export const PetBlindDateScreen: React.FC<PetBlindDateScreenProps> = ({ navigati
 
   const loadData = useCallback(async () => {
     try {
+      setLoadError(undefined);
       const feedPath = await buildFeedPath();
       const [invs, feedItems, sentReqs] = await Promise.all([
         apiGet<DateInvitation[]>('/api/date/invitations/my'),
@@ -153,7 +158,10 @@ export const PetBlindDateScreen: React.FC<PetBlindDateScreenProps> = ({ navigati
       setMyInvitations(invs);
       setFeed(feedItems);
       setHeartedIds(new Set(sentReqs.map(r => r.invitationId)));
-    } catch (_) {
+    } catch (e) {
+      // With filters applied, an empty feed reads as "your filters matched
+      // nothing" — people then widen the filters and still see nothing.
+      setLoadError(errorMessage(e, 'Could not load blind dates.'));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -276,6 +284,8 @@ export const PetBlindDateScreen: React.FC<PetBlindDateScreenProps> = ({ navigati
         ListEmptyComponent={
           loading ? (
             <ActivityIndicator size="large" color={COLORS.purple} style={{ marginTop: 40 }} />
+          ) : loadError ? (
+            <ErrorNotice message={loadError} onRetry={loadData} />
           ) : (
             <View style={styles.emptyFeed}>
               <Text style={styles.emptyFeedText}>No pet dates nearby yet.</Text>

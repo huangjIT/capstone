@@ -8,12 +8,12 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Alert,
   ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/colors';
-import { apiPost, saveToken, saveUserId } from '../utils/api';
+import { apiPost, saveToken, saveUserId, errorMessage } from '../utils/api';
+import { validateEmail, validateName, validateNewPassword } from '../utils/validation';
 
 interface SignUpScreenProps {
   navigation: any;
@@ -33,24 +33,35 @@ export const SignUpScreen: React.FC<SignUpScreenProps> = ({ navigation }) => {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  // Field-level messages mirror the backend's @NotBlank/@Email/@Size; formError
+  // carries what only the server can know, such as the email already existing.
+  const [nameError, setNameError] = useState<string>();
+  const [emailError, setEmailError] = useState<string>();
+  const [passwordError, setPasswordError] = useState<string>();
+  const [formError, setFormError] = useState<string>();
 
   const handleCreateAccount = async () => {
-    if (!name || !email || !password) {
-      Alert.alert('Error', 'Please fill in all fields');
-      return;
-    }
-    if (password.length < 6) {
-      Alert.alert('Error', 'Password must be at least 6 characters');
-      return;
-    }
+    const nextNameError = validateName(name);
+    const nextEmailError = validateEmail(email);
+    const nextPasswordError = validateNewPassword(password);
+    setNameError(nextNameError);
+    setEmailError(nextEmailError);
+    setPasswordError(nextPasswordError);
+    setFormError(undefined);
+    if (nextNameError || nextEmailError || nextPasswordError) return;
+
     try {
       setLoading(true);
-      const res = await apiPost<AuthResponse>('/api/auth/register', { name, email, password });
+      const res = await apiPost<AuthResponse>('/api/auth/register', {
+        name: name.trim(),
+        email: email.trim(),
+        password,
+      });
       await saveToken(res.token);
       await saveUserId(res.userId);
       navigation.reset({ index: 0, routes: [{ name: 'Tabs' }] });
-    } catch (e: any) {
-      Alert.alert('Sign Up Failed', e.message || 'Something went wrong');
+    } catch (e) {
+      setFormError(errorMessage(e, 'Could not create your account. Please try again.'));
     } finally {
       setLoading(false);
     }
@@ -81,36 +92,54 @@ export const SignUpScreen: React.FC<SignUpScreenProps> = ({ navigation }) => {
 
         {/* Card */}
         <View style={styles.card}>
+          {/* Server-side failure: email taken, throttled, backend unreachable */}
+          {formError ? (
+            <View style={styles.formErrorBox}>
+              <Text style={styles.formErrorText}>{formError}</Text>
+            </View>
+          ) : null}
+
           {/* Full Name */}
           <Text style={styles.fieldLabel}>Full Name</Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, nameError ? styles.inputError : null]}
             value={name}
-            onChangeText={setName}
+            onChangeText={(t) => {
+              setName(t);
+              if (nameError) setNameError(undefined);
+            }}
             placeholder="Jennifer T."
             placeholderTextColor={COLORS.textMuted}
             autoCapitalize="words"
           />
+          {nameError ? <Text style={styles.fieldError}>{nameError}</Text> : null}
 
           {/* Email */}
           <Text style={styles.fieldLabel}>Email</Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, emailError ? styles.inputError : null]}
             value={email}
-            onChangeText={setEmail}
+            onChangeText={(t) => {
+              setEmail(t);
+              if (emailError) setEmailError(undefined);
+            }}
             placeholder="your@email.com"
             placeholderTextColor={COLORS.textMuted}
             keyboardType="email-address"
             autoCapitalize="none"
           />
+          {emailError ? <Text style={styles.fieldError}>{emailError}</Text> : null}
 
           {/* Password */}
           <Text style={styles.fieldLabel}>Password</Text>
-          <View style={styles.passwordWrap}>
+          <View style={[styles.passwordWrap, passwordError ? styles.inputError : null]}>
             <TextInput
               style={styles.passwordInput}
               value={password}
-              onChangeText={setPassword}
+              onChangeText={(t) => {
+                setPassword(t);
+                if (passwordError) setPasswordError(undefined);
+              }}
               placeholder="Min. 6 characters"
               placeholderTextColor={COLORS.textMuted}
               secureTextEntry={!showPassword}
@@ -119,6 +148,7 @@ export const SignUpScreen: React.FC<SignUpScreenProps> = ({ navigation }) => {
               <Text style={styles.eyeIcon}>{showPassword ? '🙈' : '👁'}</Text>
             </TouchableOpacity>
           </View>
+          {passwordError ? <Text style={styles.fieldError}>{passwordError}</Text> : null}
 
           {/* Terms */}
           <Text style={styles.termsText}>
@@ -183,6 +213,13 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.bg, borderRadius: 14, borderWidth: 1, borderColor: COLORS.border,
     paddingHorizontal: 16, paddingVertical: 13, fontSize: 15, color: COLORS.text, marginBottom: 16,
   },
+  inputError: { borderColor: COLORS.red },
+  fieldError: { fontSize: 12, color: COLORS.red, marginTop: -10, marginBottom: 12 },
+  formErrorBox: {
+    backgroundColor: '#FEF2F2', borderColor: '#FECACA', borderWidth: 1,
+    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, marginBottom: 18,
+  },
+  formErrorText: { fontSize: 13, color: '#B91C1C', lineHeight: 18 },
   passwordWrap: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.bg,
     borderRadius: 14, borderWidth: 1, borderColor: COLORS.border, marginBottom: 12,

@@ -18,7 +18,8 @@ import { useFocusEffect } from '@react-navigation/native';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { COLORS } from '../constants/colors';
 import { ItemCard } from '../components/ItemCard';
-import { apiGet } from '../utils/api';
+import { ErrorNotice } from '../components/ErrorNotice';
+import { apiGet, errorMessage } from '../utils/api';
 
 export interface MarketItem {
   id: string;
@@ -77,6 +78,7 @@ export const MarketplaceScreen: React.FC<MarketplaceScreenProps> = ({ navigation
   const [unreadMsg, setUnreadMsg] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string>();
 
   const [conditionFilter, setConditionFilter] = useState('All');
 
@@ -169,6 +171,7 @@ export const MarketplaceScreen: React.FC<MarketplaceScreenProps> = ({ navigation
 
   const loadData = useCallback(async () => {
     try {
+      setLoadError(undefined);
       const categoryParam = activeFilter !== 'All' ? `?category=${categoryMap[activeFilter]}` : '';
       const [feedItems, mine] = await Promise.all([
         apiGet<MarketItem[]>(`/api/market/items${categoryParam}`),
@@ -176,13 +179,18 @@ export const MarketplaceScreen: React.FC<MarketplaceScreenProps> = ({ navigation
       ]);
       setFeed(feedItems);
       setMyItems(mine);
-    } catch (_) {
+    } catch (e) {
+      // Otherwise a failed load reads as "this category is empty" and sends
+      // people off to browse a filter that was never actually fetched.
+      setLoadError(errorMessage(e, 'Could not load listings.'));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, [activeFilter]);
 
+  // Unread badge only — stale is better than interrupting the grid, so a
+  // failure here stays silent deliberately.
   const refreshUnread = useCallback(async () => {
     try {
       const counts = await apiGet<Record<string, number>>('/api/messages/unread-counts');
@@ -320,6 +328,8 @@ export const MarketplaceScreen: React.FC<MarketplaceScreenProps> = ({ navigation
         ListEmptyComponent={
           loading ? (
             <ActivityIndicator size="large" color={COLORS.primary} style={{ marginTop: 40 }} />
+          ) : loadError ? (
+            <ErrorNotice message={loadError} onRetry={loadData} />
           ) : (
             <View style={styles.emptyFeed}>
               <Text style={styles.emptyFeedText}>No items in this category yet.</Text>

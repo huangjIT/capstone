@@ -230,3 +230,66 @@ security rules are locked down (uploads happen client-side).
 
 Items in **§1 (auth)** already work; everything marked ❌ needs building; ⚠️ items need the token-identity
 switch, which is also the security fix for impersonation/IDOR.
+
+---
+
+## 11. Client error handling
+
+All four verbs go through one `request()` in `src/utils/api.ts`, which turns any failure into an
+`ApiError` carrying `status`, a **human-readable** `message`, and the `correlationId` when the server
+sent one. Screens read `message` (or call `errorMessage(e, fallback)`) and never touch the raw body.
+
+Before this existed, `apiPost` threw `new Error(responseText)`, so `Error.message` *was* the JSON body
+and every screen rendered it verbatim. A wrong password showed:
+
+```
+{"message":"Invalid email or password"}
+```
+
+and a validation failure showed the whole envelope, `correlationId` included. One parser now covers all
+three backend error shapes (see [API_REFERENCE](API_REFERENCE.md#error-bodies-always-carry-message)),
+because each of them carries `message`.
+
+Rules the client applies:
+
+| Situation | What the user sees |
+|---|---|
+| 4xx with a `message` | the server's message |
+| Any 5xx | `Something went wrong on our end. Please try again.` — internals are never shown |
+| No response (server down, no network) | `Can't reach the server. Check your connection and try again.` |
+| No response within 15s | `The server took too long to respond. Please try again.` |
+| Short machine codes (`walk-full`, `no-match`, …) | mapped to real sentences via `MESSAGE_OVERRIDES` |
+
+**`fetch` has no timeout of its own.** Without the `AbortController` in `request()`, an unreachable
+backend leaves the promise pending until the OS gives up, which on the login screen is a spinner that
+never stops — indistinguishable from a frozen app. 15s is the cap; it covers reading the body too,
+since that can hang for the same reasons.
+
+### Validation: both sides, different jobs
+
+The backend's `@NotBlank`/`@Email`/`@Size` on `AuthController` is the boundary that actually enforces
+anything — anyone can post straight to the API, so it can never be removed. The client checks in
+`src/utils/validation.ts` exist only to save a round trip and put the message next to the field.
+
+Keep the client mirroring the server's **format and presence** rules and nothing more. Anything needing
+server state — whether a password is right, whether an email is taken, whether a walk is full — is the
+server's to answer, and duplicating it on the client just creates drift.
+
+### Failed loads are not empty states
+
+Screens that fetch a list keep a `loadError` and render `<ErrorNotice message onRetry />` instead of
+their empty state. Previously these swallowed the error in `catch (_) {}` and fell through to copy like
+"No walk partners nearby yet." — so a backend outage was indistinguishable from genuinely having no
+results, with nothing to read and nothing to retry.
+
+The worst case was `PostDateInvitationScreen`: a failed `GET /api/pets/my` left `pets` empty, which
+triggered the "Add a pet first" screen and pushed people who already own a pet toward creating a
+duplicate. `noPetsYet` now requires that the fetch actually succeeded.
+
+Catches that stay silent are deliberate and carry a comment saying why — optional location lookups (the
+feed still loads unlocated), the geocoder → ORS → raw-coordinates fallback chain in `RouteMapPicker`,
+unread-count polls (stale beats interrupting; the next tick corrects it), and `GoogleSignin.signOut()`
+during logout, where the local session is already cleared and a failure must not strand the user.
+
+Chat screens poll every 4s, so they surface an error **only while the thread is empty** — a blip with
+messages already on screen stays quiet.
