@@ -16,6 +16,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import * as Location from 'expo-location';
 import { COLORS } from '../constants/colors';
 import { FilterRow } from '../components/FilterRow';
+import { DistanceSlider, DEFAULT_RADIUS_KM, MAX_RADIUS_KM } from '../components/DistanceSlider';
 import { PetCard } from '../components/PetCard';
 import { ErrorNotice } from '../components/ErrorNotice';
 import { apiGet, errorMessage } from '../utils/api';
@@ -80,6 +81,8 @@ interface FindPartnersScreenProps {
 export const FindPartnersScreen: React.FC<FindPartnersScreenProps> = ({ navigation }) => {
   const insets = useSafeAreaInsets();
   const [typeFilter, setTypeFilter] = useState('All');
+  // Bounds the feed server-side; the backend clamps it to app.discovery.max-radius-km.
+  const [radiusKm, setRadiusKm] = useState(DEFAULT_RADIUS_KM);
   const [myInvitations, setMyInvitations] = useState<WalkInvitation[]>([]);
   const [feed, setFeed] = useState<WalkFeedItem[]>([]);
   const [sentRequestIds, setSentRequestIds] = useState<Set<string>>(new Set());
@@ -122,16 +125,22 @@ export const FindPartnersScreen: React.FC<FindPartnersScreenProps> = ({ navigati
   const loadData = useCallback(async () => {
     try {
       setLoadError(undefined);
-      let feedPath = '/api/walk/invitations/feed';
+      const params = new URLSearchParams();
       // Location is optional here: without it the feed is fetched unlocated
       // rather than not at all, so a denied permission is not an error.
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status === 'granted') {
           const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-          feedPath += `?lat=${loc.coords.latitude}&lng=${loc.coords.longitude}`;
+          params.append('lat', String(loc.coords.latitude));
+          params.append('lng', String(loc.coords.longitude));
+          // Radius only means anything alongside coordinates -- the backend has no
+          // origin to measure from otherwise, and sending it would be misleading.
+          params.append('radiusKm', String(radiusKm));
         }
       } catch (_) {}
+      const qs = params.toString();
+      const feedPath = `/api/walk/invitations/feed${qs ? '?' + qs : ''}`;
 
       const [invs, feedItems, sentReqs] = await Promise.all([
         apiGet<WalkInvitation[]>('/api/walk/invitations/my'),
@@ -149,7 +158,7 @@ export const FindPartnersScreen: React.FC<FindPartnersScreenProps> = ({ navigati
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [radiusKm]);
 
   // Polled every 5s while this tab is focused, so it fetches only what this screen still
   // renders: the per-conversation unread counts on the partner cards. The companion
@@ -286,6 +295,11 @@ export const FindPartnersScreen: React.FC<FindPartnersScreenProps> = ({ navigati
           options={['All', 'Dogs', 'Cats', 'Other']}
           active={typeFilter}
           onSelect={setTypeFilter}
+        />
+        <DistanceSlider
+          value={radiusKm}
+          max={MAX_RADIUS_KM}
+          onRelease={setRadiusKm}
         />
       </View>
 

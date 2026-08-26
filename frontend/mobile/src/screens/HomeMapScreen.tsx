@@ -9,6 +9,9 @@ import {
   Image,
   ActivityIndicator,
   Alert,
+  Animated,
+  PanResponder,
+  Dimensions,
 } from 'react-native';
 // MapView is a default export, not a named one — importing it as a named type failed to
 // resolve, which left the ref untyped and every camera callback an implicit any.
@@ -75,10 +78,76 @@ const PosterMarker: React.FC<{
   );
 };
 
+// Two snap points. The sheet used to be a fixed-height View with a handle bar drawn on
+// top of it -- the handle looked draggable and never was, so the partner list below the
+// fold had no way to come up.
+const SCREEN_H = Dimensions.get('window').height;
+const SHEET_MIN = 210;
+const SHEET_MAX = Math.round(SCREEN_H * 0.62);
+
 export const HomeMapScreen: React.FC<{ navigation?: any }> = ({ navigation }) => {
   const insets = useSafeAreaInsets();
   const [feed, setFeed] = useState<MapFeedItem[]>([]);
   const [loadError, setLoadError] = useState<string>();
+  // Drives the layout swap (horizontal strip vs vertical list); the height itself is
+  // animated separately so the drag can track the finger between snap points.
+  const [sheetExpanded, setSheetExpanded] = useState(false);
+
+  const sheetH = useRef(new Animated.Value(SHEET_MIN)).current;
+  // Animated.Value has no synchronous getter, and the pan handlers need the live height
+  // to offset from, so mirror it into a ref.
+  const sheetHRef = useRef(SHEET_MIN);
+  const dragStartH = useRef(SHEET_MIN);
+
+  useEffect(() => {
+    const id = sheetH.addListener(({ value }) => { sheetHRef.current = value; });
+    return () => sheetH.removeListener(id);
+  }, [sheetH]);
+
+  const snapSheet = useCallback((expand: boolean) => {
+    setSheetExpanded(expand);
+    Animated.spring(sheetH, {
+      toValue: expand ? SHEET_MAX : SHEET_MIN,
+      // height is a layout prop, so this one cannot run on the native driver.
+      useNativeDriver: false,
+      bounciness: 2,
+      speed: 14,
+    }).start();
+  }, [sheetH]);
+
+  const sheetPan = useRef(
+    PanResponder.create({
+      // Claim the touch immediately so a tap on the handle is ours to toggle with.
+      onStartShouldSetPanResponder: () => true,
+      // Only claim clearly vertical drags, so the horizontal card strip keeps its scroll.
+      onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dy) > 4 && Math.abs(g.dy) > Math.abs(g.dx),
+      onPanResponderGrant: () => { dragStartH.current = sheetHRef.current; },
+      onPanResponderMove: (_e, g) => {
+        // Dragging up is negative dy, and up means taller.
+        const next = Math.max(SHEET_MIN, Math.min(SHEET_MAX, dragStartH.current - g.dy));
+        sheetH.setValue(next);
+      },
+      onPanResponderRelease: (_e, g) => {
+        // Barely moved: treat it as a tap on the handle and toggle.
+        if (Math.abs(g.dy) < 6) {
+          snapSheetRef.current(sheetHRef.current < (SHEET_MIN + SHEET_MAX) / 2);
+          return;
+        }
+        // A flick beats position: releasing mid-travel while still moving should finish
+        // the gesture rather than snap back to whichever half the finger happened to be in.
+        if (g.vy < -0.5) snapSheetRef.current(true);
+        else if (g.vy > 0.5) snapSheetRef.current(false);
+        else snapSheetRef.current(sheetHRef.current > (SHEET_MIN + SHEET_MAX) / 2);
+      },
+      onPanResponderTerminate: () => {
+        snapSheetRef.current(sheetHRef.current > (SHEET_MIN + SHEET_MAX) / 2);
+      },
+    })
+  ).current;
+
+  // The responder is built once, so it must not close over the first snapSheet.
+  const snapSheetRef = useRef(snapSheet);
+  snapSheetRef.current = snapSheet;
   const [selectedItem, setSelectedItem] = useState<MapFeedItem | null>(null);
   const [sentIds, setSentIds] = useState<Set<string>>(new Set());
   const [connecting, setConnecting] = useState(false);
@@ -265,9 +334,15 @@ export const HomeMapScreen: React.FC<{ navigation?: any }> = ({ navigation }) =>
         </TouchableOpacity>
       </View>
 
-      {/* Bottom Sheet */}
-      <View style={[styles.bottomSheet, { paddingBottom: insets.bottom + 16 }]}>
-        <View style={styles.sheetHandle} />
+      {/* Bottom Sheet — drag the handle to reveal the full partner list */}
+      <Animated.View style={[styles.bottomSheet, { height: sheetH, paddingBottom: insets.bottom + 16 }]}>
+        {/* Plain View, not a Touchable: a Touchable runs its own responder and wins the
+            gesture, so the drag never reached PanResponder and only the tap worked. The
+            tap is handled inside the responder instead. Padded so the grab target is a
+            comfortable size even though the bar itself is 4px. */}
+        <View style={styles.grabArea} {...sheetPan.panHandlers}>
+          <View style={styles.sheetHandle} />
+        </View>
 
         {selectedItem ? (
           <View style={styles.connectPanel}>
@@ -328,6 +403,44 @@ export const HomeMapScreen: React.FC<{ navigation?: any }> = ({ navigation }) =>
               <View style={styles.emptyRow}>
                 <Text style={styles.emptyText}>No walk partners nearby yet.</Text>
               </View>
+            ) : sheetExpanded ? (
+              // Expanded, the strip becomes a real list: the whole point of dragging up
+              // is to read more than three cards without leaving the map.
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.petListContent}
+              >
+                {feed.map((item) => (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={styles.petRow}
+                    activeOpacity={0.85}
+                    onPress={() => selectItem(item)}
+                  >
+                    <View style={styles.petRowAvatar}>
+                      {item.petProfilePhotoUrl ? (
+                        <Image source={{ uri: item.petProfilePhotoUrl }} style={styles.petRowPhoto} />
+                      ) : (
+                        <Text style={styles.petMiniEmoji}>{item.petSpecies === 'CAT' ? '🐈' : '🐕'}</Text>
+                      )}
+                    </View>
+                    <View style={styles.petRowInfo}>
+                      <Text style={styles.petRowName} numberOfLines={1}>
+                        {item.petName || item.ownerName}
+                      </Text>
+                      <Text style={styles.petRowMeta} numberOfLines={1}>
+                        {[item.petBreed, item.route].filter(Boolean).join(' · ') || item.ownerName}
+                      </Text>
+                      <Text style={styles.petRowMeta} numberOfLines={1}>
+                        {[item.date, item.time].filter(Boolean).join(' · ')}
+                      </Text>
+                    </View>
+                    {item.distanceLabel ? (
+                      <Text style={styles.petRowDistance}>📍 {item.distanceLabel}</Text>
+                    ) : null}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
             ) : (
               <ScrollView
                 horizontal
@@ -359,7 +472,7 @@ export const HomeMapScreen: React.FC<{ navigation?: any }> = ({ navigation }) =>
             )}
           </>
         )}
-      </View>
+      </Animated.View>
     </View>
   );
 };
@@ -551,13 +664,36 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     elevation: 10,
   },
+  grabArea: {
+    paddingTop: 4,
+    paddingBottom: 10,
+    alignItems: 'center',
+  },
+  petListContent: { paddingHorizontal: 20, paddingBottom: 12 },
+  petRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  petRowAvatar: {
+    width: 48, height: 48, borderRadius: 24,
+    backgroundColor: COLORS.primaryLight,
+    alignItems: 'center', justifyContent: 'center',
+    overflow: 'hidden', marginRight: 12,
+  },
+  petRowPhoto: { width: 48, height: 48 },
+  petRowInfo: { flex: 1 },
+  petRowName: { fontSize: 15, fontWeight: '700', color: COLORS.text },
+  petRowMeta: { fontSize: 12, color: COLORS.textSub, marginTop: 1 },
+  petRowDistance: { fontSize: 12, color: COLORS.textMuted, marginLeft: 8 },
   sheetHandle: {
     width: 40,
     height: 4,
     borderRadius: 2,
     backgroundColor: COLORS.border,
     alignSelf: 'center',
-    marginBottom: 14,
   },
   sheetHeader: {
     flexDirection: 'row',

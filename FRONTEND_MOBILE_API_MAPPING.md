@@ -293,3 +293,44 @@ during logout, where the local session is already cleared and a failure must not
 
 Chat screens poll every 4s, so they surface an error **only while the thread is empty** — a blip with
 messages already on screen stays quiet.
+
+---
+
+## 12. Distance filter and the map sheet
+
+### Distance filter (`DistanceSlider`)
+
+Walk and Date both carry a distance control that sends `radiusKm` on the feed request. The backend
+already accepted and clamped that parameter (see
+[API_REFERENCE §2](API_REFERENCE.md#2-pets--discovery--apipets)); the client simply never offered a
+way to set it.
+
+Two things about it are deliberate:
+
+- **It is written against `PanResponder`, not a slider package.** A slider library is a *native*
+  module, so adding one means rebuilding and reinstalling the dev-client APK. `PanResponder` is core
+  React Native, so this ships over Metro like any other JS change.
+- **The value commits on release, not on every drag frame.** Each change refetches the feed; firing
+  that per pixel would hammer the endpoint and make the thumb fight the re-render.
+
+`radiusKm` is only sent when coordinates are available — without an origin the server has nothing to
+measure from, so sending a radius would be misleading rather than merely useless.
+
+Keep `DEFAULT_RADIUS_KM` / `MAX_RADIUS_KM` in step with `app.discovery.*` on the backend. They only
+decide what the control offers (the server clamps regardless), but out of step the thumb will sit at
+a distance the feed was never fetched for.
+
+### Map bottom sheet
+
+`HomeMapScreen`'s sheet drags between two snap points — a peek and ~62% of the screen — and swaps
+the horizontal three-card strip for a **vertical scrollable list** when expanded. It previously was
+a fixed-height `View` with a handle bar drawn on top: the handle looked draggable and never was, so
+the partner list below the fold had no way to come up.
+
+Worth knowing if you touch it: the handle must be a plain `View` with the pan handlers on it, **not
+a `Touchable`**. A Touchable runs its own responder and wins the gesture, so the drag never reaches
+`PanResponder` and only the tap fires. Tap-to-toggle is handled inside the responder instead, by
+treating a release with `|dy| < 6` as a tap.
+
+The sheet animates `height`, which is a layout property — so `useNativeDriver` must stay `false`
+there.

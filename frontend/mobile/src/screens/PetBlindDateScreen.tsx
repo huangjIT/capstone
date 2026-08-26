@@ -18,6 +18,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import * as Location from 'expo-location';
 import { COLORS } from '../constants/colors';
 import { FilterRow } from '../components/FilterRow';
+import { DistanceSlider, DEFAULT_RADIUS_KM, MAX_RADIUS_KM } from '../components/DistanceSlider';
 import { PetCard } from '../components/PetCard';
 import { ErrorNotice } from '../components/ErrorNotice';
 import { apiGet, apiPost, errorMessage } from '../utils/api';
@@ -92,6 +93,8 @@ export const PetBlindDateScreen: React.FC<PetBlindDateScreenProps> = ({ navigati
   const [myInvitations, setMyInvitations] = useState<DateInvitation[]>([]);
   const [feed, setFeed] = useState<DateFeedItem[]>([]);
   const [heartedIds, setHeartedIds] = useState<Set<string>>(new Set());
+  // Bounds the feed server-side; the backend clamps it to app.discovery.max-radius-km.
+  const [radiusKm, setRadiusKm] = useState(DEFAULT_RADIUS_KM);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string>();
   const [refreshing, setRefreshing] = useState(false);
@@ -140,11 +143,14 @@ export const PetBlindDateScreen: React.FC<PetBlindDateScreenProps> = ({ navigati
         const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
         params.append('lat', String(loc.coords.latitude));
         params.append('lng', String(loc.coords.longitude));
+        // Radius only means anything alongside coordinates -- the backend has no
+        // origin to measure from otherwise, and sending it would be misleading.
+        params.append('radiusKm', String(radiusKm));
       }
     } catch (_) {}
     const qs = params.toString();
     return `/api/date/invitations/feed${qs ? '?' + qs : ''}`;
-  }, [speciesFilter, ageFilter, vaccineFilter, breedFilter]);
+  }, [speciesFilter, ageFilter, vaccineFilter, breedFilter, radiusKm]);
 
   const loadData = useCallback(async () => {
     try {
@@ -261,6 +267,7 @@ export const PetBlindDateScreen: React.FC<PetBlindDateScreenProps> = ({ navigati
         <FilterRow label="Age" options={['Any', '0-1y', '1-3y', '3-7y', '7y+']} active={ageFilter} onSelect={setAgeFilter} accentColor={COLORS.purple} />
         <FilterRow label="Vaccine" options={['All', 'Yes', 'No']} active={vaccineFilter} onSelect={setVaccineFilter} accentColor={COLORS.purple} />
         <FilterRow label="Breed" options={['All', 'Persian', 'Corgi', 'Poodle', 'Shiba', 'Maine Coon']} active={breedFilter} onSelect={setBreedFilter} accentColor={COLORS.purple} />
+        <DistanceSlider value={radiusKm} max={MAX_RADIUS_KM} onRelease={setRadiusKm} accentColor={COLORS.purple} />
       </View>
 
       {/* List */}
