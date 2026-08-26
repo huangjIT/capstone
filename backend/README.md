@@ -526,6 +526,21 @@ rationale.
 - **Multi-node deployment** — 2-node + witness topology in [`deploy/`](deploy/README.md).
 - **Metrics for the previously invisible** — Kafka batch-size distribution, telemetry parse/batch
   error counters, push delivery counters.
+- **Caller mistakes answer 4xx, not 5xx** — `GlobalExceptionHandler` maps bad parameters, unknown
+  paths and unparseable request bodies to 400/404. Each one previously reached the catch-all as a
+  500, logging a stack trace and counting a server error against a healthy server. The remaining
+  5xx counter now means something.
+
+### Error contract
+
+Every error body carries a `message`, whatever produced it — the `ErrorResponse` envelope from
+`GlobalExceptionHandler`, a controller returning a status directly, or the raw JSON written by
+`JwtAuthFilter` and `LoginRateLimitFilter`. That invariant is what lets the mobile client parse all
+of them with a single function, so keep it when adding endpoints.
+
+A 5xx `message` is an internal detail (`"JSON parse error: Unexpected character..."`) and clients are
+expected to replace it with their own copy rather than render it. `HttpMessageNotReadableException`
+is deliberately not echoed for the same reason: the parser quotes the offending input back.
 
 ### Known Issues
 1. **Plain HTTP in the single-instance deployment:** tokens and the Grafana admin password cross

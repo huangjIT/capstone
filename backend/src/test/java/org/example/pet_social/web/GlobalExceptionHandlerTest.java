@@ -4,9 +4,11 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpInputMessage;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
@@ -66,5 +68,20 @@ class GlobalExceptionHandlerTest {
         ResponseEntity<ErrorResponse> res = handler.handleNotFound(
                 new NoResourceFoundException(HttpMethod.GET, "/actuator/prometheus", "actuator/prometheus"), request);
         assertEquals(404, res.getStatusCode().value());
+    }
+
+    /** A truncated or non-JSON body used to reach the catch-all and answer 500,
+     *  filing a server-error metric for what is entirely the caller's mistake. */
+    @Test
+    void malformedBodyMapsTo400WithoutEchoingTheInput() {
+        ResponseEntity<ErrorResponse> res = handler.handleUnreadableBody(
+                new HttpMessageNotReadableException(
+                        "JSON parse error: Unexpected character ('n' (code 110))",
+                        mock(HttpInputMessage.class)),
+                request);
+
+        assertEquals(400, res.getStatusCode().value());
+        // The parser quotes the offending bytes back; that is not for the client.
+        assertEquals("Malformed request body", res.getBody().message());
     }
 }

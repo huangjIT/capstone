@@ -149,12 +149,24 @@ No service or controller exists for any of: **Pet, Post, Comment, Event, EventAt
 - No rate limiting on any endpoint (relevant given `/api/test-data/stream` can spin up unbounded background load generators).
 
 ### 4.3 Data integrity / validation
-- No Bean Validation (`@NotNull`, `@Email`, `@Pattern`, etc.) anywhere on entities or request bodies.
+- ~~No Bean Validation anywhere~~ — **partly done.** `AuthController`'s request records carry
+  `@NotBlank`/`@Email`/`@Size`, and `MethodArgumentNotValidException` maps to a 400 listing the failed
+  fields. This is the boundary that actually enforces anything: the mobile app is not the only client,
+  so the client-side checks in `frontend/mobile/src/utils/validation.ts` exist for the round trip and the
+  inline message, never as a gate. Still to do: the same treatment on pet, invitation and market bodies,
+  which currently validate ad hoc inside controllers.
 - No DB-level FK constraints, no enum constraints (see Section 3).
-- No schema migration tool (Flyway/Liquibase) — relies entirely on Hibernate `ddl-auto: update`, so schema history isn't versioned or reviewable.
+- ~~No schema migration tool~~ — **done.** Flyway owns the schema (`backend/src/main/resources/db/migration`)
+  and `ddl-auto` is `validate`, so entity/migration drift fails at startup instead of silently mutating tables.
 
 ### 4.4 Testing
-- Exactly one test exists: `PetSocialApplicationTests.contextLoads()` (a no-op smoke test). No coverage for matching logic, telemetry processing, dashboard aggregation, or any repository/entity behavior.
+- ~~Exactly one test exists~~ — **40 tests now** across `AuthServiceTest`, `LoginRateLimiterTest`,
+  `MatchingServiceTest`, `PetQueryServiceTest`, `UserServiceTest` and `GlobalExceptionHandlerTest`,
+  running on H2 so `@SpringBootTest` needs no Docker (`src/test/resources/application.yml`).
+- Still uncovered: telemetry processing, dashboard aggregation, and repository/entity behaviour.
+- Unit tests alone have twice missed demo-breaking failures that only appear against real
+  infrastructure and a real device — boot the stack and drive the emulator before calling something
+  done. See [`E2E_TESTING.md`](../E2E_TESTING.md).
 
 ### 4.5 Geospatial story for PawPal
 - "Nearby pets/playdates" has no real implementation path yet — would need either a `Pet`/`User` location field + reuse of Redis GEO, or a Postgres extension (PostGIS) for proper radius queries, since `Event.findNearbyEvents`'s bounding-box approach doesn't account for longitude distortion at different latitudes and doesn't return distance-sorted results.

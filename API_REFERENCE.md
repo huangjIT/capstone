@@ -40,7 +40,26 @@ pre-formatted by the server — so responses can be rendered without re-mapping.
 - Display fields come pre-formatted: `age: "2y"`, `distance: "0.3 km"`, `date: "Sat, Jun 8"`, `time: "9:00 AM"` or `"2 min ago"`.
 - Validation failures return **400** with `{ "message": "field: reason; field2: reason" }` (plus timestamp/path metadata).
 - Unexpected errors return a JSON body shaped `{ timestamp, status, error, message, path, correlationId }`.
+- A body that isn't valid JSON (truncated, empty, malformed) returns **400** `{ "message": "Malformed request body" }`.
+  It used to reach the catch-all as a 500, which logged a stack trace and counted a server error against
+  a healthy server for what is entirely the caller's mistake. The parser's own message quotes the offending
+  input back, so it is replaced rather than echoed.
 - Enum-ish inputs are case-insensitive (`"walk"` == `"WALK"`).
+
+### Error bodies always carry `message`
+
+Three code paths produce errors and they do not share a shape, but every one of them has a `message`
+field — which is what lets the mobile client parse all of them with one function:
+
+| Source | Shape |
+|---|---|
+| `GlobalExceptionHandler` (validation, 4xx/5xx) | `{ timestamp, status, error, message, path, correlationId }` |
+| Controllers returning a status directly | `{ "message": "Invalid email or password" }` |
+| `JwtAuthFilter` / `LoginRateLimitFilter` | `{ "message": "Missing or invalid Bearer token" }` |
+
+Clients must read `message` and never render the raw body: it can contain a `correlationId` and, on a
+5xx, internal detail that means nothing to a user. `frontend/mobile/src/utils/api.ts` does this once,
+centrally — see [Client error handling](FRONTEND_MOBILE_API_MAPPING.md#client-error-handling).
 
 ## Screen → endpoint map
 

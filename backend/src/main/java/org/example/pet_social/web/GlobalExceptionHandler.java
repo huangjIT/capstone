@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -70,6 +71,18 @@ public class GlobalExceptionHandler {
     @ExceptionHandler({MissingServletRequestParameterException.class, MethodArgumentTypeMismatchException.class})
     public ResponseEntity<ErrorResponse> handleBadParameter(Exception ex, HttpServletRequest request) {
         return respond(HttpStatus.BAD_REQUEST, ex, request);
+    }
+
+    /**
+     * A body that isn't valid JSON is the same class of caller mistake as a bad
+     * query parameter, but it was still reaching the catch-all: a truncated
+     * request logged a stack trace and counted against the 5xx metric on an
+     * otherwise healthy server. The parser's own message quotes the offending
+     * input, so it is replaced rather than echoed back.
+     */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ErrorResponse> handleUnreadableBody(HttpMessageNotReadableException ex, HttpServletRequest request) {
+        return respond(HttpStatus.BAD_REQUEST, new IllegalArgumentException("Malformed request body"), request);
     }
 
     /**
