@@ -18,7 +18,7 @@ import * as Location from 'expo-location';
 import { COLORS } from '../constants/colors';
 import { apiPost, apiPut, apiDelete } from '../utils/api';
 import { uploadImage } from '../utils/uploadImage';
-import { MarketItem, categoryEmoji } from './MarketplaceScreen';
+import { MarketItem, categoryEmoji } from '../constants/market';
 import { ImageViewerModal } from '../components/ImageViewerModal';
 
 const MAX_PHOTOS = 5;

@@ -334,3 +334,62 @@ treating a release with `|dy| < 6` as a tap.
 
 The sheet animates `height`, which is a layout property — so `useNativeDriver` must stay `false`
 there.
+
+---
+
+## 13. Chat composer, push registration, and the market require cycle
+
+### The composer must stay uncontrolled
+
+`ChatInputBar`'s `TextInput` is driven by a **ref and `defaultValue`**, not by `value`, and the
+component is wrapped in `React.memo`. Do not "tidy" it back into a controlled input.
+
+Both chat screens poll their thread every 4s and call `setMessages` with a fresh array, which
+re-renders everything below — including the composer. Re-rendering a *controlled* `TextInput` on
+Android while the soft keyboard holds a composing region (any predictive-text keyboard, mid-word)
+discards that composition, so the message that actually sent was a fragment of what was typed —
+frequently a single letter, arriving at the other person as e.g. `"d"`.
+
+The backend was never at fault: `'d'`, multi-word strings, double spaces and non-ASCII all
+round-trip through `POST /api/messages` byte-identical (verified, em-dash included).
+
+Two changes close it from both sides:
+
+- the composer keeps its draft in a ref, so no parent re-render can touch what is being typed;
+- the polls now compare the fetched thread against the current one and keep the previous array when
+  nothing changed, so a quiet conversation stops re-rendering at all.
+
+### Push registration
+
+`registerForPush()` is called after login, after sign-up, and on app start **when a session already
+exists**. Before this, nothing called it — only `unregisterPush()` on sign-out was wired — so no
+handset ever registered a device token and the entire push pipeline had no entry point. It is
+deliberately not awaited: push is optional and must never delay sign-in.
+
+Registration is skipped without an auth token, so calling it at start-up on a fresh install is a
+no-op rather than a 401, and nobody is asked for notification permission before they have signed in.
+
+**Push still needs FCM credentials to work.** The native side has none — there is no
+`android/app/google-services.json` and the `com.google.gms.google-services` plugin is not applied, so
+Firebase never initializes and Expo cannot mint a token:
+
+```
+[push] registration failed: Unable to get Firebase Messaging instance.
+Did you configure `googleServicesFile` path in app config?   code: E_REGISTRATION_FAILED
+```
+
+To finish it: download `google-services.json` for the Android app from the Firebase console (project
+`mobile-9d6dd`, the one `src/utils/firebase.ts` already points at), put it at
+`android/app/google-services.json`, add `"googleServicesFile": "./android/app/google-services.json"`
+under `expo.android` in `app.json`, then **rebuild and reinstall the dev-client APK** — this is a
+native change, so Metro alone will not pick it up. Note `firebase.ts` is the *Web* SDK used for
+Storage image uploads; it does nothing for FCM.
+
+### Market helpers live in `constants/market.ts`
+
+`MarketItem`, `categoryEmoji` and `conditionLabel` were defined in `MarketplaceScreen`, which
+`ItemCard` imported from — while `MarketplaceScreen` imported `ItemCard`. Metro permits require
+cycles but warns, and in dev that warning opened a **full-screen console overlay on top of the
+running app**, which repeatedly interrupted the Marketplace screen. They are shared vocabulary
+rather than screen state, so they moved to `src/constants/market.ts`. `MarketplaceScreen` re-exports
+them for compatibility; import from `constants/market` in new code.

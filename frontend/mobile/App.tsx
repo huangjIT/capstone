@@ -6,6 +6,8 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StyleSheet, AppState } from 'react-native';
 import { SplashScreen } from './src/screens/SplashScreen';
 import { AppNavigator } from './src/navigation/AppNavigator';
+import { registerForPush } from './src/utils/push';
+import { getToken } from './src/utils/api';
 
 export default function App() {
   const [showSplash, setShowSplash] = useState(true);
@@ -19,6 +21,18 @@ export default function App() {
       }
     });
     return () => sub.remove();
+  }, []);
+
+  // Nothing called registerForPush, so no handset ever registered a device token
+  // and the whole push pipeline had no entry point. Only run it for an existing
+  // session: on a fresh install there is no auth token to attach the device to,
+  // and asking for notification permission before someone has even signed in is
+  // the wrong moment. Login and sign-up call it themselves.
+  useEffect(() => {
+    getToken()
+      .then(token => { if (token) registerForPush(); })
+      // registerForPush swallows its own failures; this guards getToken itself.
+      .catch(() => {});
   }, []);
 
   const handleSplashFinish = () => {

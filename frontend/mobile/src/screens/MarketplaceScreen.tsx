@@ -20,51 +20,17 @@ import { COLORS } from '../constants/colors';
 import { ItemCard } from '../components/ItemCard';
 import { ErrorNotice } from '../components/ErrorNotice';
 import { apiGet, errorMessage } from '../utils/api';
-
-export interface MarketItem {
-  id: string;
-  sellerUserId: string;
-  name: string;
-  description?: string;
-  category: string;   // TOY, CARRIER, FOOD, ACCESSORY, OTHER
-  price?: number;
-  originalPrice?: number;
-  condition: string;  // NEW, LIKE_NEW, GOOD, FAIR
-  photoUrl?: string;
-  location?: string;
-  status: string;     // ACTIVE, SOLD, WITHDRAWN
-  sellerName?: string;
-  sellerAvatarUrl?: string;
-  unreadMessageCount?: number;
-  imageUrls?: string[];
-  createdAt?: string;
-}
+import { MarketItem, categoryEmoji, conditionLabel } from '../constants/market';
+// Re-exported so existing importers keep working; the definitions moved to break
+// a require cycle with ItemCard.
+export { categoryEmoji, conditionLabel };
+export type { MarketItem };
 
 type SortOption = 'NEWEST' | 'PRICE_LOW' | 'PRICE_HIGH';
 
 function formatShortDate(d: Date): string {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
-
-export const categoryEmoji = (category?: string) => {
-  switch (category) {
-    case 'TOY': return '🧸';
-    case 'CARRIER': return '🎒';
-    case 'FOOD': return '🥫';
-    case 'ACCESSORY': return '🦴';
-    default: return '📦';
-  }
-};
-
-export const conditionLabel = (condition?: string) => {
-  switch (condition) {
-    case 'NEW': return 'New';
-    case 'LIKE_NEW': return 'Like New';
-    case 'GOOD': return 'Good';
-    case 'FAIR': return 'Fair';
-    default: return condition || 'Good';
-  }
-};
 
 interface MarketplaceScreenProps {
   navigation: any;

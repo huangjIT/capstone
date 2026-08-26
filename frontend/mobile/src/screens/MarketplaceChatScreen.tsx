@@ -16,7 +16,7 @@ import { ChatBubble } from '../components/ChatBubble';
 import { ChatInputBar } from '../components/ChatInputBar';
 import { ErrorNotice } from '../components/ErrorNotice';
 import { apiGet, apiPost, errorMessage } from '../utils/api';
-import { categoryEmoji, conditionLabel } from './MarketplaceScreen';
+import { categoryEmoji, conditionLabel } from '../constants/market';
 import { ImageViewerModal } from '../components/ImageViewerModal';
 
 interface MarketplaceChatScreenProps {
@@ -43,6 +43,22 @@ function formatTime(iso: string): string {
   }
 }
 
+/**
+ * The 4s poll returns a fresh array every tick, so calling setMessages with it
+ * re-rendered the whole thread (and everything below it) even when nothing had
+ * changed. Compare identity by id + read state and keep the previous array when
+ * they match, so a quiet conversation stops re-rendering entirely.
+ */
+function sameThread(a: ChatMessage[], b: ChatMessage[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].id !== b[i].id || a[i].isOwn !== b[i].isOwn || a[i].content !== b[i].content) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export const MarketplaceChatScreen: React.FC<MarketplaceChatScreenProps> = ({
   navigation,
   route,
@@ -67,7 +83,7 @@ export const MarketplaceChatScreen: React.FC<MarketplaceChatScreenProps> = ({
     if (!item?.id || !otherUserId) return;
     try {
       const data = await apiGet<ChatMessage[]>(`/api/messages/market-item/${item.id}/${otherUserId}`);
-      setMessages(data);
+      setMessages(prev => (sameThread(prev, data) ? prev : data));
       setLoadError(undefined);
     } catch (e) {
       // Only surfaced when the thread is still empty (see render): this runs on

@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 import { COLORS } from '../constants/colors';
 import { apiPost, saveToken, saveUserId, errorMessage } from '../utils/api';
+import { registerForPush } from '../utils/push';
 import { validateEmail, validateLoginPassword } from '../utils/validation';
 
 // ── Google OAuth ─────────────────────────────────────────────────────────────
@@ -58,6 +59,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
       const res = await apiPost<AuthResponse>('/api/auth/google', { idToken });
       await saveToken(res.token);
       await saveUserId(res.userId);
+      // Now that a session exists the device token has something to attach to.
+      // Deliberately not awaited: push is optional and must never delay sign-in.
+      registerForPush();
       navigation.reset({ index: 0, routes: [{ name: 'Tabs' }] });
     } catch (e: any) {
       if (e.code === statusCodes.SIGN_IN_CANCELLED) return;
@@ -85,6 +89,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
       });
       await saveToken(res.token);
       await saveUserId(res.userId);
+      // Now that a session exists the device token has something to attach to.
+      // Deliberately not awaited: push is optional and must never delay sign-in.
+      registerForPush();
       navigation.reset({ index: 0, routes: [{ name: 'Tabs' }] });
     } catch (e) {
       setFormError(errorMessage(e, 'Invalid email or password'));

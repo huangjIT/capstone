@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { View, TextInput, TouchableOpacity, Text, StyleSheet, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/colors';
@@ -8,16 +8,45 @@ interface ChatInputBarProps {
   disabled?: boolean;
 }
 
-export const ChatInputBar: React.FC<ChatInputBarProps> = ({ onSend, disabled }) => {
-  const [text, setText] = useState('');
+/**
+ * The chat composer.
+ *
+ * The TextInput is deliberately **uncontrolled** (a ref plus defaultValue) rather
+ * than driven by `value`. Both chat screens poll their thread every 4s and call
+ * setMessages with a fresh array, which re-renders this component; re-rendering a
+ * controlled TextInput on Android while the soft keyboard is holding a composing
+ * region (any predictive-text keyboard, mid-word) discards that composition, so
+ * the message that actually got sent was a fragment of what was typed -- often a
+ * single letter. Keeping the value in native means a parent re-render cannot
+ * touch what is being typed.
+ *
+ * memo() closes the same hole from the other side: with a stable `onSend` this
+ * does not re-render on a poll at all.
+ */
+const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({ onSend, disabled }) => {
+  const inputRef = useRef<TextInput>(null);
+  // Source of truth for what is typed. State would re-render on every keystroke
+  // and put us back where we started.
+  const draft = useRef('');
+  // Only drives the send button's enabled look, never the input's contents.
+  const [canSend, setCanSend] = useState(false);
   const insets = useSafeAreaInsets();
 
-  const handleSend = () => {
-    if (text.trim() && !disabled) {
-      onSend?.(text.trim());
-      setText('');
-    }
-  };
+  const handleChangeText = useCallback((next: string) => {
+    draft.current = next;
+    const nowCanSend = next.trim().length > 0;
+    // Flip only on the empty/non-empty boundary, not per character.
+    setCanSend(prev => (prev === nowCanSend ? prev : nowCanSend));
+  }, []);
+
+  const handleSend = useCallback(() => {
+    const text = draft.current.trim();
+    if (!text || disabled) return;
+    onSend?.(text);
+    draft.current = '';
+    inputRef.current?.clear();
+    setCanSend(false);
+  }, [onSend, disabled]);
 
   if (disabled) {
     return (
@@ -33,24 +62,27 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({ onSend, disabled }) 
         <Text style={styles.emojiButtonText}>😊</Text>
       </TouchableOpacity>
       <TextInput
+        ref={inputRef}
         style={styles.input}
-        value={text}
-        onChangeText={setText}
+        defaultValue=""
+        onChangeText={handleChangeText}
         placeholder="Type a message..."
         placeholderTextColor={COLORS.textMuted}
         multiline
         maxLength={500}
       />
       <TouchableOpacity
-        style={[styles.sendButton, !text.trim() && styles.sendButtonDisabled]}
+        style={[styles.sendButton, !canSend && styles.sendButtonDisabled]}
         onPress={handleSend}
-        disabled={!text.trim()}
+        disabled={!canSend}
       >
         <Text style={styles.sendIcon}>▶</Text>
       </TouchableOpacity>
     </View>
   );
 };
+
+export const ChatInputBar = React.memo(ChatInputBarComponent);
 
 const styles = StyleSheet.create({
   container: {

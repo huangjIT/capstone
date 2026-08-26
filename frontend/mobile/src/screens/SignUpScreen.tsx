@@ -13,6 +13,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/colors';
 import { apiPost, saveToken, saveUserId, errorMessage } from '../utils/api';
+import { registerForPush } from '../utils/push';
 import { validateEmail, validateName, validateNewPassword } from '../utils/validation';
 
 interface SignUpScreenProps {
@@ -59,6 +60,9 @@ export const SignUpScreen: React.FC<SignUpScreenProps> = ({ navigation }) => {
       });
       await saveToken(res.token);
       await saveUserId(res.userId);
+      // Now that a session exists the device token has something to attach to.
+      // Deliberately not awaited: push is optional and must never delay sign-in.
+      registerForPush();
       navigation.reset({ index: 0, routes: [{ name: 'Tabs' }] });
     } catch (e) {
       setFormError(errorMessage(e, 'Could not create your account. Please try again.'));

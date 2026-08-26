@@ -43,6 +43,22 @@ function formatTime(iso: string): string {
   }
 }
 
+/**
+ * The 4s poll returns a fresh array every tick, so calling setMessages with it
+ * re-rendered the whole thread (and everything below it) even when nothing had
+ * changed. Compare identity by id + read state and keep the previous array when
+ * they match, so a quiet conversation stops re-rendering entirely.
+ */
+function sameThread(a: ChatMessage[], b: ChatMessage[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].id !== b[i].id || a[i].isOwn !== b[i].isOwn || a[i].content !== b[i].content) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export const WalkRequestDetailScreen: React.FC<WalkRequestDetailScreenProps> = ({
   navigation,
   route,
@@ -70,7 +86,7 @@ export const WalkRequestDetailScreen: React.FC<WalkRequestDetailScreenProps> = (
       const data = await apiGet<ChatMessage[]>(
         `/api/messages/${isDate ? 'date-request' : 'walk-request'}/${requestId}`
       );
-      setMessages(data);
+      setMessages(prev => (sameThread(prev, data) ? prev : data));
       setLoadError(undefined);
     } catch (e) {
       // Rendered only while the thread is empty: this polls every 4s, so a blip
@@ -110,7 +126,9 @@ export const WalkRequestDetailScreen: React.FC<WalkRequestDetailScreenProps> = (
     } catch (e: any) {
       Alert.alert('Error', e?.message || 'Failed to send message');
     }
-  }, [otherUserId]);
+    // requestId and isDate are read above, so they belong here — without them a
+    // thread opened second kept sending against the first one's request id.
+  }, [otherUserId, requestId, isDate]);
 
   const handleAction = async (status: 'ACCEPTED' | 'REJECTED' | 'BLOCKED' | 'PENDING') => {
     if (!notif?.id) return;

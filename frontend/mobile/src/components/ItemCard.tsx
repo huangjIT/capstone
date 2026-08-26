@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
 import { COLORS } from '../constants/colors';
-import { MarketItem, categoryEmoji, conditionLabel } from '../screens/MarketplaceScreen';
+import { MarketItem, categoryEmoji, conditionLabel } from '../constants/market';
 
 interface ItemCardProps {
   item: MarketItem;
