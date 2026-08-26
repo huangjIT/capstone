@@ -46,6 +46,27 @@ pre-formatted by the server — so responses can be rendered without re-mapping.
   input back, so it is replaced rather than echoed.
 - Enum-ish inputs are case-insensitive (`"walk"` == `"WALK"`).
 
+### Scheduling is in local wall-clock time — mind the zone
+
+Invitation `date` and `time` are **display strings the client formatted in its own timezone**
+(`"Mon, Jul 5, 2026"` + `"9:00 AM"`), not instants. The backend parses them into a naive
+`scheduledAt` and never attaches an offset, so nothing in the payload records which zone they meant.
+
+That matters because `scheduledAt` is the only thing separating an active invitation from a finished
+one: there is no upcoming/completed status column. `POST /api/{walk,date}/invitations` is
+active while `scheduledAt` is in the future, and moves to `/completed` once it passes.
+
+Asking "has it passed?" therefore has to happen in the **same zone the client wrote it in**, which is
+`app.timezone` (`APP_TIMEZONE`, default `America/Toronto`) — *not* the server clock. Left at the
+container default of UTC, an evening booking in Toronto was compared against a UTC clock already
+past midnight, so it read as finished the moment it was posted: it never appeared in anyone's feed
+and showed up under Completed instead. A booking a day out cleared the offset and behaved normally,
+which is why only same-day ones broke.
+
+**Set `APP_TIMEZONE` to the timezone your users are actually in.** This is correct for a
+single-timezone deployment and wrong for users spread across zones — that needs the client to send
+an ISO-8601 timestamp with offset and the column to become a real instant, which is a migration.
+
 ### Error bodies always carry `message`
 
 Three code paths produce errors and they do not share a shape, but every one of them has a `message`

@@ -26,6 +26,12 @@ management:
       enabled: ${MGMT_PROMETHEUS_ENABLED:false}
 
 app:
+  # The wall clock invitation date/time strings are written in. The phone formats them in its
+  # own zone and the backend stores that naive local time, so "has this booking passed?" must be
+  # asked in the same zone — not the container's, which is UTC. Left at the server default this
+  # made an evening booking in Toronto expire the moment it was posted. Set to the timezone your
+  # users are actually in; a multi-timezone deployment needs real instants instead (see below).
+  timezone: ${APP_TIMEZONE:America/Toronto}
   # HMAC secret for signing app JWTs. MUST be overridden via APP_JWT_SECRET in every
   # non-local environment — the app refuses to start with the built-in dev value unless
   # spring.profiles.active includes "dev" (see JwtService).

@@ -32,6 +32,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
@@ -85,6 +86,17 @@ public class PartnerBoardService {
     private final double defaultRadiusKm;
     private final double maxRadiusKm;
 
+    /**
+     * The wall clock invitations are written in. date/time arrive as display strings the
+     * phone formatted in its own zone ("Mon, Jul 5, 2026" + "9:00 AM") and scheduledAt keeps
+     * them as that same naive local time -- so "has it passed?" has to be asked in that zone.
+     * Comparing against the server clock instead read a 9pm booking in Toronto as already over,
+     * because the container runs UTC and it was already 1am there: the invitation vanished from
+     * the feed the moment it was posted and surfaced under Completed. A booking a day out
+     * cleared the offset and behaved, which is why only same-day ones broke.
+     */
+    private final ZoneId zone;
+
     public PartnerBoardService(PartnerInvitationRepository invitationRepository,
                                PartnerRequestRepository requestRepository,
                                PetRepository petRepository,
@@ -94,7 +106,8 @@ public class PartnerBoardService {
                                StringRedisTemplate redisTemplate,
                                ObjectMapper objectMapper,
                                @Value("${app.discovery.default-radius-km:25}") double defaultRadiusKm,
-                               @Value("${app.discovery.max-radius-km:100}") double maxRadiusKm) {
+                               @Value("${app.discovery.max-radius-km:100}") double maxRadiusKm,
+                               @Value("${app.timezone:America/Toronto}") String timezone) {
         this.invitationRepository = invitationRepository;
         this.requestRepository = requestRepository;
         this.petRepository = petRepository;
@@ -105,6 +118,7 @@ public class PartnerBoardService {
         this.objectMapper = objectMapper;
         this.defaultRadiusKm = defaultRadiusKm;
         this.maxRadiusKm = maxRadiusKm;
+        this.zone = ZoneId.of(timezone);
     }
 
     // ---------------------------------------------------------------- feed
@@ -302,7 +316,7 @@ public class PartnerBoardService {
 
         List<PartnerInvitation> hosted = invitationRepository
                 .findByTypeAndHost_IdAndStatusOrderByCreatedAtDesc(TYPE_WALK, userId, STATUS_ACTIVE)
-                .stream().filter(PartnerBoardService::isExpiredInvitation).toList();
+                .stream().filter(this::isExpiredInvitation).toList();
         if (!hosted.isEmpty()) {
             List<PartnerRequest> hostRequests = requestRepository
                     .findByTypeAndInvitation_Host_IdOrderByCreatedAtDesc(TYPE_WALK, userId);
@@ -355,7 +369,7 @@ public class PartnerBoardService {
 
         List<PartnerInvitation> hosted = invitationRepository
                 .findByTypeAndHost_IdAndStatusOrderByCreatedAtDesc(TYPE_DATE, userId, STATUS_ACTIVE)
-                .stream().filter(PartnerBoardService::isExpiredInvitation).toList();
+                .stream().filter(this::isExpiredInvitation).toList();
         if (!hosted.isEmpty()) {
             List<PartnerRequest> hostRequests = requestRepository
                     .findByTypeAndInvitation_Host_IdOrderByCreatedAtDesc(TYPE_DATE, userId);
@@ -678,8 +692,8 @@ public class PartnerBoardService {
     }
 
     /** An invitation (walk or date) whose scheduled time has passed. */
-    private static boolean isExpiredInvitation(PartnerInvitation inv) {
-        return inv.getScheduledAt() != null && inv.getScheduledAt().isBefore(LocalDateTime.now());
+    private boolean isExpiredInvitation(PartnerInvitation inv) {
+        return inv.getScheduledAt() != null && inv.getScheduledAt().isBefore(LocalDateTime.now(zone));
     }
 
     /** Pipe-joined image URLs, capped to 5 — mirrors ownedPetCsv's CSV-column pattern. */

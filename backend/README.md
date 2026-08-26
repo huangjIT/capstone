@@ -531,6 +531,19 @@ rationale.
   500, logging a stack trace and counting a server error against a healthy server. The remaining
   5xx counter now means something.
 
+### Scheduling timezone (`APP_TIMEZONE`)
+
+Invitation date/time are display strings the phone formatted in **its** zone, and `scheduledAt`
+keeps them as that same naive local time. Whether a booking has passed — the only thing separating
+an active invitation from a completed one, since there is no status column for it — is therefore a
+question that has to be asked in that zone.
+
+`app.timezone` (default `America/Toronto`) supplies it. Left at the container default of UTC, a
+9 PM Toronto booking was compared against a UTC clock already past midnight and read as finished
+the moment it was posted: gone from the feed, listed under Completed. Set this to the timezone your
+users are in. Multi-timezone deployments need real instants instead — the client sending ISO-8601
+with an offset and the column changing type, which is a migration rather than a config flag.
+
 ### Error contract
 
 Every error body carries a `message`, whatever produced it — the `ErrorResponse` envelope from
