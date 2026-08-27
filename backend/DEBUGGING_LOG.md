@@ -269,16 +269,50 @@ Every fix above was verified against **running infrastructure**, not just compil
 Twice, unit tests passed while the app was broken. The habit that caught these was booting the
 whole stack and driving the real UI.
 
-## Known-incomplete, stated honestly
+## 9. Push tokens from two different Expo projects in one request
 
-**Push delivery is not finished.** The pipeline is verified up to the last hop:
+**Symptom.** With FCM credentials finally uploaded, delivery still failed:
 
 ```
-Push rejected: Unable to retrieve the FCM server key for the recipient's app.
+PUSH_TOO_MANY_EXPERIENCE_IDS
+All push notification messages in the same request must be for the same project
+details: {
+  "@jim-huang/mobile":       ["ExponentPushToken[lX2-fMP0OOdebSn9KlfLLj]"],
+  "@sanjyot01s-team/pawpal": ["ExponentPushToken[rDZwC4PEeqoN_dwM28h9cs]"]
+}
 ```
 
-The backend sends to Expo, Expo accepts, and Expo cannot forward to FCM because no service
-account key has been uploaded to the Expo project. That is one credential upload, not a code
-change. The correct phrasing is *"push infrastructure is implemented and verified end to end;
-FCM credentials are pending"* — which is both accurate and something you can defend if
-someone asks you to demo it.
+**Root cause.** An Expo push token is scoped to the **Expo project that minted it**. The
+account had registered a token under the original project and, after moving to its own EAS
+project, a second one — both still active for the same user. `PushNotificationService` batches
+all of a user's active tokens into one Expo request, and Expo rejects a batch spanning
+projects.
+
+**Fix (operational).** Retire the stale token via `DELETE /api/notifications/device-token`.
+
+**Worth fixing properly.** The backend should either group tokens per project before sending,
+or treat a `PUSH_TOO_MANY_EXPERIENCE_IDS` response as a signal to deactivate tokens that no
+longer belong to the current project. Right now one stale token silently blocks *every*
+notification to that user — a single bad row is a per-user outage.
+
+**Lesson.** Opaque third-party identifiers usually carry hidden scope. A push token is not
+just "a device" — it is a device *for a specific project*, and mixing scopes in one batch is
+a category error the API is right to reject. When you migrate projects, the old credentials
+do not become invalid, they become *wrong*, which is harder to notice.
+
+---
+
+## Outcome
+
+Push notifications were verified end to end on a Pixel 3: message sent from a second account,
+app backgrounded, notification delivered to the tray with correct sender and body. The full
+chain — backend → Kafka → Expo → FCM → device — is working.
+
+Getting there required, in order: wiring a function nobody called (#6), configuring FCM
+natively so Firebase could initialise (#6), fixing a concurrency bug that only became
+reachable once registration ran (#7), uploading the service account key so Expo could forward
+to FCM, and clearing a stale token from a previous Expo project (#9).
+
+Each fault was individually invisible. Every one of them had to be fixed before a single
+notification could arrive — which is the honest reason "is push done?" was hard to answer
+until it was actually tested.
