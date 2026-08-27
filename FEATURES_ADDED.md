@@ -28,12 +28,8 @@ Stack: Spring Boot backend (`backend/`), Expo/React Native mobile frontend (`fro
 15. [Marketplace: $500 Price Cap](#15-marketplace-500-price-cap)
 16. [Profile: "Listings" Stat (Replaces Unused "Posts")](#16-profile-listings-stat-replaces-unused-posts)
 17. [Infrastructure-Level Fixes](#17-infrastructure-level-fixes)
-18. [Known Follow-Ups](#18-known-follow-ups)
-19. [Distance-Bounded Discovery (Bug Fix)](#19-distance-bounded-discovery-bug-fix)
-20. [One Notification Entry Point](#20-one-notification-entry-point)
-21. [Demo Seeding](#21-demo-seeding)
-22. [Grafana in the Deployed Stack](#22-grafana-in-the-deployed-stack)
-23. [App Identity: PawPal](#23-app-identity-pawpal)
+18. [Push Notifications (Android)](#18-push-notifications-android)
+19. [Known Follow-Ups](#19-known-follow-ups)
 
 ---
 
@@ -253,89 +249,86 @@ A few smaller fixes that don't warrant their own section but are worth knowing a
 
 ---
 
-## 18. Known Follow-Ups
+## 18. Push Notifications (Android)
+
+**What it does.** An OS-level notification arrives on the recipient's handset when someone
+messages them or acts on a walk/date request — even with the app backgrounded or closed.
+
+**Verified end to end**, not merely wired: message sent from a second account, app
+backgrounded, notification delivered to the tray with the correct sender name and body.
+
+### How it flows
+
+```
+event  ->  Kafka (app-events)  ->  PushNotificationService  ->  Expo push service  ->  FCM  ->  device
+```
+
+Notably the backend does **not** talk to Firebase directly. It posts to
+`https://exp.host/--/api/v2/push/send` and Expo relays to FCM. That keeps one token format and
+one payload shape across Android and iOS, and keeps FCM's OAuth2 token exchange out of the
+backend. FCM is still the transport — Expo is a relay in front of it, not an alternative.
+
+Sending happens on the Kafka consumer thread, never a request thread, so a slow push service
+cannot occupy Tomcat workers.
+
+### Client
+
+| Piece | Where |
+|---|---|
+| Permission, Android channels, token retrieval | `src/utils/push.ts` |
+| Registration on login / sign-up / warm start | `App.tsx`, `LoginScreen`, `SignUpScreen` |
+| Token retirement on sign-out | `MeProfileScreen` → `unregisterPush()` |
+
+`registerForPush()` is **not awaited** — push is optional and must never delay sign-in. It also
+no-ops without an auth token, so a cold start on a fresh install neither 401s nor prompts for
+notification permission before the user has signed in.
+
+### Backend
+
+- `POST /api/notifications/device-token` — claims a token for the caller. Idempotent: an
+  existing token is reassigned and reactivated rather than duplicated, so a shared handset
+  stops receiving the previous account's notifications.
+- `DELETE /api/notifications/device-token` — deactivates on logout (kept, not deleted, so
+  delivery history stays readable). Only the owning user may retire a token.
+- `PushNotificationService` reads Expo's delivery receipts and deactivates tokens reported
+  dead (app uninstalled, token rotated), and exports counters for delivery and pruning.
+
+### Configuration required
+
+Push needs credentials in **two** places, and missing either fails silently in a different way:
+
+1. **`android/app/google-services.json`** — lets the device obtain a token at all. Wired via
+   `"googleServicesFile"` in `app.json`; `expo prebuild` places the file and applies the
+   `com.google.gms.google-services` Gradle plugin. Without it Firebase never initialises and
+   the client logs `E_REGISTRATION_FAILED`.
+2. **An FCM V1 service account key uploaded to the Expo project** (`eas credentials` →
+   Android → Google Service Account). Without it the backend sends successfully, Expo accepts,
+   and delivery dies at Expo with *"Unable to retrieve the FCM server key."*
+
+Because (1) is compiled into the app, **adding it requires an APK rebuild** — Metro alone will
+not pick it up.
+
+### Two defects this feature surfaced
+
+- **A concurrency bug in token registration.** `register()` looked a token up and inserted if
+  absent — a check-then-act race. The client registers on launch *and* after login; when those
+  overlap both miss and both insert, and the loser hit the unique constraint and 500'd. Now
+  caught and retried outside the rolled-back transaction. See
+  [`backend/DEBUGGING_LOG.md`](backend/DEBUGGING_LOG.md) §7.
+- **Tokens are scoped to an Expo project.** An account holding tokens minted under two
+  different Expo projects makes Expo reject the whole batch
+  (`PUSH_TOO_MANY_EXPERIENCE_IDS`), so one stale row silently blocks *every* notification to
+  that user. Worth hardening: group by project before sending, or retire mismatched tokens on
+  that error.
+
+---
+
+## 19. Known Follow-Ups
 
 - `PartnerInvitation.endLatitude` / `endLongitude` (a walk's route destination) are
   captured on the backend and sent from `PostInvitationScreen.tsx`, but there's no
   UI currently rendering them — a "show the actual route on a map" feature was
   scoped down to just the existing text-based location display per product decision.
   The data is there if that's revisited later.
-- Push notifications: the code is now complete on both sides — channels, priority, TTL, dead-token
-  pruning, deep links, logout unregister — but **delivery does not work yet**. There is no
-  `google-services.json` and no `android.googleServicesFile` in `app.json`, so Firebase Messaging
-  never initialises and `getExpoPushTokenAsync()` fails with `E_REGISTRATION_FAILED`, verified on
-  a device. The app degrades to "no push" rather than crashing, and everything in-app is
-  unaffected. Finishing it needs an FCM V1 service account uploaded to Expo plus that file in the
-  build — see <https://docs.expo.dev/push-notifications/fcm-credentials/>.
-
----
-
-## 19. Distance-Bounded Discovery (Bug Fix)
-
-The map, Find Partners and Blind Date screens showed partners thousands of kilometres away.
-
-`PartnerBoardService.walkFeed()`/`dateFeed()` computed a distance for every card and used it
-**only to render the "4.2 km away" label** — there was no filter and no sort, so every open
-invitation in the database came back, ordered by invitation id. A walk on another continent
-outranked one across the street on a screen headed "Nearby Walking Partners".
-
-Distance is now a real filter: `app.discovery.default-radius-km` (25 km) with results sorted
-nearest-first, clamped server-side to `max-radius-km` (100 km) because the client supplies
-`radiusKm`. Cards with no coordinates are kept, at the end — an invitation whose host never set a
-location is unplaceable, not far away.
-
-`PetQueryService` got the same bound plus a structural fix: it now selects candidates from one
-`GEOSEARCH` and reads only those owners from Postgres, instead of loading every
-playdate-available pet and asking Redis for each owner's position one at a time.
-
-> **Worth knowing why it survived two audits:** earlier reviews checked
-> `/api/pets/{partners,blind-dates}`. The mobile app never calls those — it reads
-> `/api/{walk,date}/invitations/feed`, which is entirely different code.
-
-## 20. One Notification Entry Point
-
-The notification list was reachable from four screens under three different icons (🔔 on Me, 💬 on
-Walk and Date, count badges on invitation cards), plus a red dot on the Walk tab. The unread count
-was fetched independently in three of them, so the badges regularly disagreed with each other.
-
-Now: **one bell, top-right of the Home map**, reading the count from the server on every focus.
-The per-invitation "N requests" badges stay — those describe a specific invitation you posted, not
-a second copy of the inbox.
-
-Two things fell out of it: the Walk tab's red dot was only ever populated while that tab was open,
-so it went stale the moment you navigated away; and removing the header buttons retired two
-5-second polls of `/api/messages/unread-counts` that existed solely to light a dot.
-
-## 21. Demo Seeding
-
-`POST /api/demo/seed` fills an empty deployment with 20 owners, 26 pets, 14 walk/date invitations
-with 22 pending requests, 18 posts, 19 comments, 6 events, 14 listings, conversations, reviews and
-notifications — written out by hand rather than generated, because generated data reads as
-generated.
-
-Two things it does that matter:
-
-- **Presence, not just rows.** Seeded users are pushed through the real telemetry consumer, so
-  they land in `users:geo` with a live `users:presence:*` key. Rows in Postgres alone leave the
-  map and the partner feeds empty.
-- **Relocatable.** `?lat=&lon=` translates the whole catalogue, keeping the neighbourhoods'
-  relative geometry. A distance-bounded feed shows nothing to someone demoing from another
-  continent, so the city has to be able to move to them.
-
-Gated behind `app.demo-seed.enabled` (default **false**, the opposite of the load-test endpoints)
-and behind the JWT filter. One-shot with no delete path — a "reset" that can drop users is not
-something worth having on a box that might hold real accounts.
-
-## 22. Grafana in the Deployed Stack
-
-`docker-compose.aws.yml` gains Prometheus and Grafana with a provisioned datasource and a
-committed 17-panel dashboard, so a fresh box comes up already showing request rate and latency,
-match outcomes, the telemetry pipeline, rate-limited auth attempts, and JVM/Hikari/Tomcat
-saturation. Prometheus publishes no host port — it scrapes `app:8080` over the compose network,
-which is why the metrics endpoint can be enabled without exposing it through the published 8080.
-
-## 23. App Identity: PawPal
-
-The app called itself "mobile" in the launcher and in the Android notification permission prompt.
-Renamed in `app.json` and `strings.xml`. New icon: a map pin with a paw knocked out of it — the
-two things the product is — in the brand orange, with proper adaptive and monochrome variants.
+- ~~Push notifications~~ — **shipped, see [§18](#18-push-notifications-android).** Delivered
+  end to end on a physical-equivalent device (Pixel 3 emulator with Play Services).
