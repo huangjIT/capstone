@@ -12,6 +12,9 @@ import org.example.pet_social.service.DeviceTokenService;
 import org.example.pet_social.service.UserService;
 import org.example.pet_social.web.JwtAuthFilter;
 import jakarta.validation.constraints.NotBlank;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
@@ -22,6 +25,8 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/notifications")
 public class NotificationController {
+
+    private static final Logger log = LoggerFactory.getLogger(NotificationController.class);
 
     private final NotificationRepository notificationRepository;
     private final UserService userService;
@@ -47,7 +52,21 @@ public class NotificationController {
         if (user == null) {
             return ResponseEntity.badRequest().build();
         }
-        deviceTokenService.register(user, body.token(), body.platform());
+        try {
+            deviceTokenService.register(user, body.token(), body.platform());
+        } catch (DataIntegrityViolationException e) {
+            // register() looks the token up and then inserts if it is missing, which is a
+            // check-then-act race: the client registers on launch and again after login, and
+            // when those overlap both find nothing and both insert. One wins, the other hits
+            // uk_device_tokens_token and the whole request 500s -- so every login after the
+            // first failed to register a device.
+            //
+            // The retry runs outside the rolled-back transaction, so the row the winner
+            // inserted is now visible and register() takes its update path. Registering the
+            // same token twice has to be a no-op, not an error.
+            log.debug("Device token {} already claimed concurrently; retrying as an update", body.token());
+            deviceTokenService.register(user, body.token(), body.platform());
+        }
         return ResponseEntity.ok(Map.of("status", "registered"));
     }
 
